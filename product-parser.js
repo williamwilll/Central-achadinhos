@@ -122,6 +122,30 @@ export function visibleMercadoLivrePrice(html) {
   return [...new Set(blocks)].length===1 ? blocks[0] : null;
 }
 
+// Fallback para páginas sociais dos links meli.la: o bloco do produto
+// compartilhado pode trazer current_price sem metadados og:price.
+export function extractMercadoLivreSocial(html) {
+  const page = String(html || '').slice(0,1500000)
+    .replace(/\\u([0-9a-fA-F]{4})/g,(_,code)=>String.fromCharCode(parseInt(code,16)))
+    .replace(/\\"/g,'"');
+  const title = readMeta(page).get('og:title');
+  if (!title) return null;
+  const expected = normalize(title).toLocaleLowerCase('pt-BR');
+  const anchors = [...page.matchAll(/"title"\s*:\s*\{\s*"text"\s*:\s*"([^"]{4,250})"/g)];
+  const matching = anchors.filter(m=>normalize(m[1]).toLocaleLowerCase('pt-BR') === expected);
+  if (matching.length !== 1) return null;
+  const text = page.slice(matching[0].index,matching[0].index + 3000);
+  const current = [...text.matchAll(/"current_price"\s*:\s*\{\s*"value"\s*:\s*([0-9]+(?:\.[0-9]{1,2})?)(?:\s*,\s*"currency"\s*:\s*"([A-Z]{3})")?/g)];
+  if (current.length !== 1) return null;
+  const currency = current[0][2] || '';
+  if (currency && currency !== 'BRL') return null;
+  const price = parseBRLPrice(current[0][1]);
+  if (price === null) return null;
+  const previous = text.match(/"previous_price"\s*:\s*\{\s*"value"\s*:\s*([0-9]+(?:\.[0-9]{1,2})?)/);
+  const oldPrice = previous ? parseBRLPrice(previous[1]) : null;
+  return {price,oldPrice:oldPrice !== null && oldPrice > price ? oldPrice : null};
+}
+
 export function extractProduct(html, url) {
   const page = new URL(url);
   const brazil = /(?:^|\.)mercadolivre\.com\.br$|(?:^|\.)shopee\.com\.br$/i.test(page.hostname);
@@ -153,11 +177,20 @@ export function extractProduct(html, url) {
     const distinct = [...new Set(values)];
     if (distinct.length === 1) {price = distinct[0];priceSource = 'Oferta estruturada do produto';}
   }
+  let oldPrice = null;
+  if (price === null && brazil) {
+    const social = extractMercadoLivreSocial(html);
+    if (social) {
+      price = social.price;
+      oldPrice = social.oldPrice;
+      priceSource = 'Bloco de preço do produto compartilhado no Mercado Livre';
+    }
+  }
   const categoryDirect = validCategory(product?.category || tags.get('product:category') || tags.get('og:category') || tags.get('article:section'));
   const categoryBreadcrumb = breadcrumbCategory(nodes,title);
   const category = categoryDirect || categoryBreadcrumb || inference(title);
   const categorySource = categoryDirect ? 'Loja' : categoryBreadcrumb ? 'Navegação da loja' : category ? 'Sugestão pelo título' : '';
   const canonical = tags.get('og:url') || '';
   const itemId = mercadolivreItemId(page.pathname) || mercadolivreItemId(canonical) || mercadolivreItemId(html.match(/<link\s+[^>]*rel=["']canonical["'][^>]*>/i)?.[0] || '');
-  return {title,image,price,category,categorySource,priceSource,itemId};
+  return {title,image,price,oldPrice,category,categorySource,priceSource,itemId};
 }
