@@ -95,7 +95,14 @@ async function callToken(form,request=fetch){
     headers:{'content-type':'application/x-www-form-urlencoded','accept':'application/json'},
     body:new URLSearchParams(form).toString()
   });
-  if(!response.ok)throw Error('Mercado Livre recusou a autorização (HTTP '+response.status+').');
+  if(!response.ok){
+    // Nunca registrar response body, authorization code, tokens ou credenciais.
+    const status=Number(response.status);
+    const category=status===400?'bad_request':status===401?'unauthorized':
+      status===403?'forbidden':status===429?'rate_limited':
+      status>=500?'upstream_error':'other';
+    throw Error('Mercado Livre recusou a autorização (HTTP '+status+', categoria='+category+').');
+  }
   const result=asSession(await response.json());
   if(!result)throw Error('Resposta de tokens inválida ou incompleta.');
   return result;
