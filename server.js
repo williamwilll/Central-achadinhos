@@ -96,7 +96,12 @@
         itemFields:(html.match(/item_id/gi)||[]).length,
         titleCards:(html.match(/"title"\s*:\s*\{\s*"text"/gi)||[]).length,
         hasJsonEscapes:html.includes('\\\\"'),
-        length:html.length
+        length:html.length,
+        fieldShapes:[...html.matchAll(/product_id|item_id/gi)].slice(0,6)
+          .map(m=>html.slice(m.index,m.index+110)
+            .replace(/https?:\\/\\/[^\\s"']+/gi,'[URL]')
+            .replace(/\\d/g,'#')
+            .replace(/[A-Za-z0-9_]{30,}/g,'[TEXT]'))
       };
       const product=extractProduct(html,target.href);
       const canonical=html.match(/<meta\s+[^>]*(?:property|name)=["']og:url["'][^>]*content=["']([^"']+)["']/i)?.[1]||'';
