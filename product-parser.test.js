@@ -71,3 +71,18 @@ test('não usa USD como preço de anúncio social Mercado Livre',()=>{
  const p=extractProduct(html,'https://www.mercadolivre.com.br/social/x');
  assert.equal(p.price,null);
 });
+
+test('preço principal com divs aninhadas na página de produto', async()=>{
+ const { visibleMercadoLivrePrice } = await import('./product-parser.js');
+ const html='<div class="ui-pdp-price__main-container"><div><div class="ui-pdp-price__second-line"><div>'
+ +'<span class="andes-money-amount__currency-symbol">R$</span>'
+ +'<span class="andes-money-amount__fraction">65</span>'
+ +'<span class="andes-money-amount__cents">70</span></div></div></div>';
+ assert.equal(visibleMercadoLivrePrice(html),65.7);
+});
+test('preço social com caracteres escapados e espaços no JSON',()=>{
+ const html='<meta property="og:title" content="Calça Jeans Country Feminina">'
+ + '{\\"title\\": {\\"text\\": \\"Calça Jeans Country Feminina\\"}, \\"current_price\\": {\\"value\\": \\"65.70\\", \\"currency\\": \\"BRL\\"}}';
+ const p=extractProduct(html,'https://www.mercadolivre.com.br/social/produto');
+ assert.equal(p.price,65.7);
+});
