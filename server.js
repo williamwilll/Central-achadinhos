@@ -2,6 +2,7 @@
   const { createServer } = await import('node:http');
   const { extractProduct } = await import('./product-parser.js');
   const { officialMLPrice } = await import('./mercadolivre-price.js');
+  const {parseShopeeIds,officialShopeeProduct} = await import('./shopee-affiliate.js');
   const { readFile, stat } = await import('node:fs/promises');
   const { fileURLToPath } = await import('node:url');
   const { dirname, resolve, extname, sep } = await import('node:path');
@@ -18,6 +19,12 @@
   async function getPreview(link){
     let target=marketUrl(link);
     for(let i=0;i<6;i++){
+      // Para links diretos da Shopee, usar API oficial antes da página, que pode bloquear robôs.
+      const shopIds=parseShopeeIds(target.href);
+      if(shopIds) {
+        const verified=await officialShopeeProduct(shopIds);
+        if(verified)return {...verified,itemId:shopIds.itemId,source:verified.source||target.hostname};
+      }
       const response=await fetch(target,{redirect:'manual',signal:AbortSignal.timeout(8000),headers:{'user-agent':'Mozilla/5.0 (compatible; AchadinhosPreview/1.0)','accept':'text/html'}});
       if(response.status>=300&&response.status<400){
         const location=response.headers.get('location');
@@ -35,6 +42,13 @@
       }finally{await reader.cancel().catch(()=>{});}
       const html=new TextDecoder().decode(Buffer.concat(chunks));
       const product = extractProduct(html,target.href);
+      // Algumas páginas da Shopee carregam uma URL canônica com shopId/itemId.
+      const canonical=html.match(/<meta\s+[^>]*(?:property|name)=["']og:url["'][^>]*content=["']([^"']+)["']/i)?.[1] || '';
+      const canonicalIds=parseShopeeIds(canonical);
+      if(canonicalIds) {
+        const verified=await officialShopeeProduct(canonicalIds);
+        if(verified)return {...verified,itemId:canonicalIds.itemId,source:verified.source||target.hostname};
+      }
       if (product.itemId && process.env.ML_ACCESS_TOKEN) {
         const official = await officialMLPrice(product.itemId);
         if (official) Object.assign(product,official);
@@ -42,11 +56,11 @@
       return {
         ...product,
         source: target.hostname,
-        priceNote: product.price === null
+        priceNote: product.priceNote || (product.price === null
           ? (product.itemId
               ? 'Preço indisponível nesta consulta. A API oficial exige credencial válida; confira o anúncio ou configure ML_ACCESS_TOKEN no Render.'
               : 'O link não forneceu preço nem identificador confiável. Tente o link completo do anúncio; confirme o valor na loja.')
-          : 'Preço obtido de ' + product.priceSource + '. Confira no anúncio antes de publicar.'
+          : 'Preço obtido de ' + product.priceSource + '. Confira no anúncio antes de publicar.')
       };
     }
     throw Error('Muitos redirecionamentos. Preencha manualmente.');
