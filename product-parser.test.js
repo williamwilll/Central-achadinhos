@@ -48,3 +48,26 @@ test('categoria pode vir de breadcrumb de produto',()=>{
  const html=nodes.map(x=>'<script type="application/ld+json">'+JSON.stringify(x)+'</script>').join('');
  assert.equal(extractProduct(html,'https://www.mercadolivre.com.br/anuncio').category,'Calças');
 });
+
+test('meli.la: usa preço do bloco compartilhado quando a página não tem og:price',()=>{
+ const html='<html><head><meta property="og:title" content="Calça Country Feminina"/></head><body>'
+   +'{"components":[{"type":"title","title":{"text":"Calça Country Feminina"}},'
+   +'{"type":"price","price":{"previous_price":{"value":199.90,"currency":"BRL"},'
+   +'"current_price":{"value":139.90,"currency":"BRL"}}}]}</body></html>';
+ const p=extractProduct(html,'https://www.mercadolivre.com.br/social/x');
+ assert.equal(p.price,139.9);
+ assert.equal(p.oldPrice,199.9);
+ assert.match(p.priceSource,/compartilhado/);
+});
+test('não aceita preço de recomendação de outro anúncio',()=>{
+ const html='<meta property="og:title" content="Calça Country Feminina">'
+   +'{"components":[{"title":{"text":"Outra oferta"}},{"current_price":{"value":19.90,"currency":"BRL"}}]}';
+ const p=extractProduct(html,'https://www.mercadolivre.com.br/social/x');
+ assert.equal(p.price,null);
+});
+test('não usa USD como preço de anúncio social Mercado Livre',()=>{
+ const html='<meta property="og:title" content="Calça Country Feminina">'
+  +'{"components":[{"title":{"text":"Calça Country Feminina"}},{"current_price":{"value":80.00,"currency":"USD"}}]}';
+ const p=extractProduct(html,'https://www.mercadolivre.com.br/social/x');
+ assert.equal(p.price,null);
+});
