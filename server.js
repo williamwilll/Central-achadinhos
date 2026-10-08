@@ -192,5 +192,13 @@
       ', ShopeeID='+Boolean(process.env.SHOPEE_APP_ID)+
       ', ShopeeSecret='+Boolean(process.env.SHOPEE_APP_SECRET)+
       ', SenhaAdmin='+Boolean(adminPassword));
+    // Verificação temporária e segura do anúncio reportado (nenhum segredo ou preço em logs).
+    getPreview('https://meli.la/2v48pY7').then(result=>{
+      const d=result.importDiagnostic||{};
+      console.log('ML_SELFTEST:',JSON.stringify({
+        identifier:d.identifier||'unknown',api:d.api||'unknown',tokenConfigured:!!d.tokenConfigured,
+        priceAvailable:typeof result.price==='number'&&result.price>0,hasTitle:!!result.title
+      }));
+    }).catch(()=>console.log('ML_SELFTEST:',JSON.stringify({fetchFailed:true})));
   });
 })();
