@@ -90,10 +90,10 @@
       // Informações estruturais para diagnóstico; nunca expor HTML, link completo ou token.
       const signals={
         finalHost:target.hostname,finalPathType:target.pathname.includes('/social')?'social':target.pathname.includes('/p/')?'catalog':'other',
-        mlbTokens:(html.match(/\\bMLB-?\\d{7,14}\\b/gi)||[]).length,
+        mlbTokens:(html.match(/\bMLB-?\d{7,14}\b/gi)||[]).length,
         productFields:(html.match(/product_id/gi)||[]).length,
         itemFields:(html.match(/item_id/gi)||[]).length,
-        titleCards:(html.match(/"title"\\s*:\\s*\\{\\s*"text"/gi)||[]).length,
+        titleCards:(html.match(/"title"\s*:\s*\{\s*"text"/gi)||[]).length,
         hasJsonEscapes:html.includes('\\\\"'),
         length:html.length
       };
