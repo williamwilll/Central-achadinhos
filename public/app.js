@@ -155,7 +155,7 @@
     el('live-title').textContent = el('form-title-input').value.trim() || 'Nome do produto';
     el('live-platform').textContent = el('form-platform').value;
     const price = plainNumber(el('form-price').value);
-    el('live-price').textContent = Number.isNaN(price) ? 'R$ 0,00' : money(price);
+    el('live-price').textContent = Number.isNaN(price) || price <= 0 ? 'Preço não informado' : money(price);
     const image = safeHttp(el('form-image').value, true);
     el('live-image').innerHTML = image ? `<img src="${html(image)}" alt="Prévia do produto">` : '<span>🛍️</span>';
   }
