@@ -202,8 +202,15 @@
           res.writeHead(303,{'location':'/?ml=connected','set-cookie':[tokens.cookie,tokens.clearState],
             'cache-control':'no-store','referrer-policy':'no-referrer'});
           return res.end();
-        }catch {
-          res.writeHead(303,{'location':'/?ml=error','cache-control':'no-store','referrer-policy':'no-referrer'});
+        }catch(error) {
+          const reason=error.message.includes('código de segurança')?'state':
+            error.message.includes('recusou a autorização')?'token':
+            error.message.includes('tokens inválida')?'response':
+            error.message.includes('Código de autorização')?'code':
+            error.message.includes('Autorização não foi concluída')?'denied':'unknown';
+          console.warn('[ML_OAUTH] Falha na autorização; etapa='+reason);
+          res.writeHead(303,{'location':'/?ml=error&reason='+reason,
+            'cache-control':'no-store','referrer-policy':'no-referrer'});
           return res.end();
         }
       }
