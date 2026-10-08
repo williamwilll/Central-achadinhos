@@ -134,23 +134,26 @@ export function visibleMercadoLivrePrice(html) {
 export function extractMercadoLivreSocial(html) {
   const page = String(html || '').slice(0,1500000)
     .replace(/\\u([0-9a-fA-F]{4})/g,(_,code)=>String.fromCharCode(parseInt(code,16)))
-    .replace(/\\"/g,'"');
-  const title = readMeta(page).get('og:title');
-  if (!title) return null;
-  const expected = normalize(title).toLocaleLowerCase('pt-BR');
-  const anchors = [...page.matchAll(/"title"\s*:\s*\{\s*"text"\s*:\s*"([^"]{4,250})"/g)];
-  const matching = anchors.filter(m=>normalize(m[1]).toLocaleLowerCase('pt-BR') === expected);
-  if (matching.length !== 1) return null;
-  const text = page.slice(matching[0].index,matching[0].index + 3000);
-  const current = [...text.matchAll(/"current_price"\s*:\s*\{\s*"value"\s*:\s*([0-9]+(?:\.[0-9]{1,2})?)(?:\s*,\s*"currency"\s*:\s*"([A-Z]{3})")?/g)];
-  if (current.length !== 1) return null;
-  const currency = current[0][2] || '';
-  if (currency && currency !== 'BRL') return null;
-  const price = parseBRLPrice(current[0][1]);
-  if (price === null) return null;
-  const previous = text.match(/"previous_price"\s*:\s*\{\s*"value"\s*:\s*([0-9]+(?:\.[0-9]{1,2})?)/);
-  const oldPrice = previous ? parseBRLPrice(previous[1]) : null;
-  return {price,oldPrice:oldPrice !== null && oldPrice > price ? oldPrice : null};
+    .replace(/\\"/g,'"')
+    .replace(/&quot;|&#34;|&#x22;/gi,'"');
+  const title=readMeta(page).get('og:title');
+  if(!title)return null;
+  const normalized=normalize(title).toLocaleLowerCase('pt-BR');
+  const anchors=[...page.matchAll(/"title"\s*:\s*\{\s*"text"\s*:\s*"([^"]{4,250})"/g)]
+    .filter(m=>normalize(m[1]).toLocaleLowerCase('pt-BR')===normalized);
+  if(anchors.length!==1)return null;
+  // Próximos 10 KB: encontramos somente preço associado ao título exato.
+  const window=page.slice(anchors[0].index,anchors[0].index+10000);
+  const candidates=[...window.matchAll(/"current_price"\s*:\s*\{\s*"value"\s*:\s*"?([0-9]+(?:\.[0-9]{1,2})?)"?/g)];
+  if(candidates.length!==1)return null;
+  const candidate=candidates[0];
+  const currency=window.slice(candidate.index,candidate.index+350).match(/"currency"\s*:\s*"([A-Z]{3})"/);
+  if(currency && currency[1]!=='BRL')return null;
+  const price=parseBRLPrice(candidate[1]);
+  if(price===null)return null;
+  const prior=window.slice(0,candidate.index+350).match(/"previous_price"\s*:\s*\{\s*"value"\s*:\s*"?([0-9]+(?:\.[0-9]{1,2})?)"?/);
+  const oldPrice=prior?parseBRLPrice(prior[1]):null;
+  return {price,oldPrice:oldPrice !== null && oldPrice>price?oldPrice:null};
 }
 
 export function extractProduct(html, url) {
