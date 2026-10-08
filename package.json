@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Painel gratuito para organizar ofertas de afiliados",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"
