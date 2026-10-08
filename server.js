@@ -1,6 +1,7 @@
 (async function boot(){
   const { createServer } = await import('node:http');
   const { extractProduct } = await import('./product-parser.js');
+  const { officialMLPrice } = await import('./mercadolivre-price.js');
   const { readFile, stat } = await import('node:fs/promises');
   const { fileURLToPath } = await import('node:url');
   const { dirname, resolve, extname, sep } = await import('node:path');
@@ -34,12 +35,18 @@
       }finally{await reader.cancel().catch(()=>{});}
       const html=new TextDecoder().decode(Buffer.concat(chunks));
       const product = extractProduct(html,target.href);
+      if (product.itemId && process.env.ML_ACCESS_TOKEN) {
+        const official = await officialMLPrice(product.itemId);
+        if (official) Object.assign(product,official);
+      }
       return {
         ...product,
         source: target.hostname,
         priceNote: product.price === null
-          ? 'Preço não identificado. Verifique o valor na loja e preencha manualmente.'
-          : 'Preço obtido de ' + product.priceSource + '. Confira o valor final na loja antes de divulgar.'
+          ? (product.itemId
+              ? 'Preço indisponível nesta consulta. A API oficial exige credencial válida; confira o anúncio ou configure ML_ACCESS_TOKEN no Render.'
+              : 'O link não forneceu preço nem identificador confiável. Tente o link completo do anúncio; confirme o valor na loja.')
+          : 'Preço obtido de ' + product.priceSource + '. Confira no anúncio antes de publicar.'
       };
     }
     throw Error('Muitos redirecionamentos. Preencha manualmente.');
