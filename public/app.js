@@ -2,16 +2,17 @@
   'use strict';
   const KEY = 'central-achadinhos-offers-v1';
   const SETTINGS = 'central-achadinhos-settings-v1';
+  const CATEGORIES = 'central-achadinhos-categories-v1';
   const DEFAULT_SETTINGS = { name: 'Achadinhos VIP | Ofertas do Dia', group: '', channel: '', invite: '🛍️ Entre para o nosso grupo VIP de achadinhos! Ofertas da Shopee, Mercado Livre e TikTok Shop todos os dias. 🔥' };
   const platforms = ['Shopee', 'Mercado Livre', 'TikTok Shop'];
   const statuses = ['rascunho', 'pronta', 'publicada'];
-  const state = { offers: load(KEY, []), settings: { ...DEFAULT_SETTINGS, ...load(SETTINGS, {}) }, selected: null, editing: null, currentView: 'inicio', deleting: null };
+  const state = { offers: load(KEY, []), categories: load(CATEGORIES, []), settings: { ...DEFAULT_SETTINGS, ...load(SETTINGS, {}) }, selected: null, editing: null, currentView: 'inicio', deleting: null };
   const $ = selector => document.querySelector(selector);
   const $$ = selector => [...document.querySelectorAll(selector)];
   const el = id => document.getElementById(id);
   function load(key, fallback) { try { const raw = JSON.parse(localStorage.getItem(key) || 'null'); return raw ?? fallback; } catch { return fallback; } }
   function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(state.offers)); localStorage.setItem(SETTINGS, JSON.stringify(state.settings)); return true; }
+    try { localStorage.setItem(KEY, JSON.stringify(state.offers)); localStorage.setItem(SETTINGS, JSON.stringify(state.settings)); localStorage.setItem(CATEGORIES, JSON.stringify(state.categories)); return true; }
     catch { toast('Sem espaço no armazenamento. Exporte um backup e libere espaço.', true); return false; }
   }
   const html = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -52,6 +53,33 @@
     return clean;
   }
   state.offers = Array.isArray(state.offers) ? state.offers.slice(0, 3000).map(parseOffer).filter(Boolean) : [];
+  const normalizeCategory = value => String(value || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+  const cleanCategory = value => String(value || '').trim().replace(/\s+/g, ' ').slice(0,60);
+  const loadedCategories = Array.isArray(state.categories) ? state.categories.slice(0,500) : [];
+  state.categories = [];
+  for (const original of [...loadedCategories,...state.offers.map(o => o.category)]) {
+    const name = cleanCategory(original);
+    if (name && !state.categories.some(existing => normalizeCategory(existing)===normalizeCategory(name))) state.categories.push(name);
+  }
+  function renderCategorySuggestions() {
+    const list = el('category-options');
+    if (list) list.innerHTML = [...state.categories].sort((a,b)=>a.localeCompare(b,'pt-BR')).map(name=>'<option value="'+html(name)+'"></option>').join('');
+    const count = el('category-count');
+    if (count) count.textContent = state.categories.length
+      ? state.categories.length + ' categorias salvas. Categorias iguais são reutilizadas.'
+      : 'Ao importar ou salvar, a nova categoria será adicionada automaticamente.';
+  }
+  function rememberCategory(value, persist = false) {
+    const category = cleanCategory(value);
+    if (!category) return '';
+    const found = state.categories.find(name => normalizeCategory(name)===normalizeCategory(category));
+    if (found) return found;
+    state.categories.push(category);
+    renderCategorySuggestions();
+    if (persist) save();
+    return category;
+  }
+  renderCategorySuggestions();
   const platformClass = platform => platform === 'Mercado Livre' ? 'ml' : platform === 'TikTok Shop' ? 'tt' : '';
   const discount = offer => offer.oldPrice > offer.price ? Math.round((1 - offer.price / offer.oldPrice) * 100) : 0;
   const statusName = status => ({ publicada: 'Publicada', pronta: 'Pronta', rascunho: 'Rascunho' })[status] || status;
@@ -103,8 +131,13 @@
   const inputIds = ['form-platform', 'form-category', 'form-title-input', 'form-price', 'form-old-price', 'form-coupon', 'form-status', 'form-link', 'form-image'];
   function beginOffer(id = null) {
     state.editing = id;
+    clearTimeout(importTimer);
+    importSerial += 1;
+    previewAbort?.abort();
+    el('preview-button').disabled = false;
+    el('preview-button').textContent = 'Buscar dados';
     el('offer-form').reset(); el('preview-url').value = '';
-    el('preview-status').textContent = 'Na versão offline, preencha os dados manualmente; a busca automática exige o servidor Node.';
+    el('preview-status').textContent = 'Cole um link. O sistema buscará título, imagem, preço e categoria disponíveis.';
     el('preview-status').className = 'assist-message';
     const o = id ? get(id) : null;
     el('form-title').textContent = o ? 'Editar oferta' : 'Adicionar oferta';
@@ -142,7 +175,7 @@
     const old = state.editing ? get(state.editing) : null;
     const data = {
       id: old?.id || crypto.randomUUID(), createdAt: old?.createdAt || now, updatedAt: now,
-      platform: el('form-platform').value, category: el('form-category').value.trim(),
+      platform: el('form-platform').value, category: rememberCategory(el('form-category').value),
       title: el('form-title-input').value.trim(), price, oldPrice,
       coupon: el('form-coupon').value.trim(), url, image, status: el('form-status').value
     };
@@ -154,34 +187,84 @@
     toast(old ? 'Oferta atualizada com sucesso.' : 'Oferta cadastrada com sucesso.');
     navigate('ofertas');
   }
-  async function importPreview() {
-    const url = safeHttp(el('preview-url').value);
-    if (!url) return toast('Cole um link válido para buscar os dados.', true);
-    const status = el('preview-status');
-    status.className = 'assist-message'; status.textContent = 'Consultando os dados públicos disponíveis…';
-    const button = el('preview-button'); button.disabled = true; button.textContent = 'Buscando…';
+  let importTimer = null;
+  let importSerial = 0;
+  let previewAbort = null;
+  function platformForLink(link) {
     try {
-      const response = await fetch('/api/preview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url }) });
+      const host = new URL(link).hostname.toLowerCase();
+      if (/(^|\.)shopee\.com(\.br)?$|(^|\.)shope\.ee$/.test(host)) return 'Shopee';
+      if (/(^|\.)mercadolivre\.com(\.br)?$|(^|\.)mercadolibre\.com$|(^|\.)meli\.la$/.test(host)) return 'Mercado Livre';
+      if (/(^|\.)tiktok\.com$|(^|\.)tiktokshop\.com$/.test(host)) return 'TikTok Shop';
+    } catch {}
+    return '';
+  }
+  function scheduleImport(fieldId = 'preview-url') {
+    clearTimeout(importTimer);
+    ++importSerial;
+    previewAbort?.abort();
+    const url = safeHttp(el(fieldId).value.trim(), true);
+    if (!url || !platformForLink(url)) return;
+    if (fieldId === 'preview-url') el('form-link').value = url;
+    else el('preview-url').value = url;
+    const status = el('preview-status');
+    status.className = 'assist-message';
+    status.textContent = 'Link reconhecido. Buscando título, imagem, preço e categoria…';
+    importTimer = setTimeout(() => importPreview(url), 550);
+  }
+  async function importPreview(urlOverride = '') {
+    clearTimeout(importTimer);
+    const url = safeHttp(urlOverride || el('preview-url').value, true);
+    if (!url || !platformForLink(url)) return toast('Cole um link HTTPS da Shopee, Mercado Livre ou TikTok Shop.', true);
+    const serial = ++importSerial;
+    previewAbort?.abort();
+    const controller = new AbortController();
+    previewAbort = controller;
+    const status = el('preview-status');
+    status.className = 'assist-message';
+    status.textContent = 'Consultando dados públicos do produto…';
+    const button = el('preview-button');
+    button.disabled = true;
+    button.textContent = 'Buscando…';
+    try {
+      const response = await fetch('/api/preview', {
+        method:'POST', headers: {'content-type':'application/json'},
+        body:JSON.stringify({url}), signal:controller.signal
+      });
       const data = await response.json();
+      if (serial !== importSerial) return;
       if (!response.ok) throw new Error(data.error || 'Prévia indisponível.');
-      const host = new URL(url).hostname.toLowerCase();
-      if (host.includes('shopee')) el('form-platform').value = 'Shopee';
-      else if (host.includes('mercado') || host.includes('meli.la')) el('form-platform').value = 'Mercado Livre';
-      else if (host.includes('tiktok')) el('form-platform').value = 'TikTok Shop';
+      const platform = platformForLink(url);
+      if (platform) el('form-platform').value = platform;
       if (data.title) el('form-title-input').value = data.title;
       if (data.image) el('form-image').value = data.image;
-      if (data.price && data.price > 0) el('form-price').value = String(data.price).replace('.', ',');
-      el('form-link').value = url; // preserve the original affiliate URL
-      status.textContent = `Prévia obtida de ${data.source}. ${data.priceNote} Confirme também nome e foto.`;
-      status.className = 'assist-message success';
+      if (typeof data.price === 'number' && Number.isFinite(data.price) && data.price > 0) {
+        el('form-price').value = data.price.toFixed(2).replace('.', ',');
+      } else {
+        el('form-price').value = '';
+      }
+      if (data.category) el('form-category').value = rememberCategory(data.category,true);
+      el('form-link').value = url; // preserva o link original do afiliado
+      el('preview-url').value = url;
+      const categoryText = data.category
+        ? 'Categoria: ' + el('form-category').value + ' (' + (data.categorySource || 'encontrada') + ').'
+        : 'Categoria não identificada. Você pode cadastrá-la manualmente.';
+      status.textContent = (data.priceNote || 'Confira o preço na loja.') + ' ' + categoryText;
+      status.className = data.price == null ? 'assist-message error' : 'assist-message success';
       updateLivePreview();
-      toast(data.title || data.image ? 'Prévia preenchida. Revise os dados.' : 'Link reconhecido. Complete as informações.');
+      toast(data.price != null ? 'Dados importados. Confira o valor antes de publicar.' : 'Produto identificado, porém sem preço confirmado.',data.price == null);
     } catch (error) {
+      if (serial !== importSerial || error?.name === 'AbortError') return;
       el('form-link').value = url;
-      status.textContent = `${error.message} O link foi preservado; preencha os demais campos manualmente.`;
+      status.textContent = error.message + ' Link preservado; confira os campos faltantes manualmente.';
       status.className = 'assist-message error';
-      toast('Prévia não disponível; continue o cadastro manualmente.', true);
-    } finally { button.disabled = false; button.textContent = 'Buscar dados'; }
+      toast('A loja não liberou todos os dados do produto.', true);
+    } finally {
+      if (serial === importSerial) {
+        button.disabled = false;
+        button.textContent = 'Buscar dados';
+      }
+    }
   }
   function caption(o) {
     if (!o) return 'Cadastre e selecione uma oferta para preparar a mensagem.';
@@ -254,7 +337,7 @@
   }
   const dateFile = () => new Date().toLocaleDateString('sv-SE');
   function exportJson() {
-    download(`central-achadinhos-${dateFile()}.json`, 'application/json;charset=utf-8', JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), settings: state.settings, offers: state.offers }, null, 2));
+    download(`central-achadinhos-${dateFile()}.json`, 'application/json;charset=utf-8', JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), settings: state.settings, categories: state.categories, offers: state.offers }, null, 2));
     toast('Backup JSON gerado. Guarde em local seguro.');
   }
   function exportCsv() {
@@ -276,6 +359,11 @@
       if (all.some(o => !o)) throw new Error('O backup contém ofertas inválidas.');
       if (!window.confirm(`Restaurar ${all.length} ofertas? Isso substitui as informações atuais deste navegador.`)) return;
       state.offers = all;
+      state.categories = [];
+      for (const category of [...(Array.isArray(data.categories) ? data.categories.slice(0,500) : []), ...all.map(o=>o.category)]) {
+        rememberCategory(category);
+      }
+      renderCategorySuggestions();
       const s = data.settings && typeof data.settings === 'object' ? data.settings : {};
       state.settings = {
         name: String(s.name || DEFAULT_SETTINGS.name).slice(0,100),
@@ -313,8 +401,15 @@
   el('today-label').textContent = new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'long',year:'numeric'});
   ['offer-search','platform-filter','status-filter'].forEach(id => el(id).addEventListener(id==='offer-search' ? 'input' : 'change', renderOffers));
   inputIds.forEach(id => el(id).addEventListener('input', updateLivePreview));
+  el('preview-url').addEventListener('input', () => scheduleImport('preview-url'));
+  el('form-link').addEventListener('input', () => scheduleImport('form-link'));
+  el('form-category').addEventListener('blur', () => {
+    const value = cleanCategory(el('form-category').value);
+    const found = state.categories.find(category => normalizeCategory(category)===normalizeCategory(value));
+    if (found) el('form-category').value = found;
+  });
   el('offer-form').addEventListener('submit', submitOffer);
-  el('preview-button').addEventListener('click', importPreview);
+  el('preview-button').addEventListener('click', () => importPreview());
   el('copy-post').addEventListener('click', () => copy(caption(get(state.selected))));
   el('share-whatsapp').addEventListener('click', whatsappShare);
   el('mark-published').addEventListener('click', markPublished);
