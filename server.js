@@ -1,6 +1,6 @@
 (async function boot(){
   const { createServer } = await import('node:http');
-  const { extractProduct } = await import('./product-parser.js');
+  const { extractProduct,mercadolivreItemId } = await import('./product-parser.js');
   const { officialMLPrice } = await import('./mercadolivre-price.js');
   const {parseShopeeIds,officialShopeeProduct} = await import('./shopee-affiliate.js');
   const { readFile, stat } = await import('node:fs/promises');
@@ -19,6 +19,8 @@
   async function getPreview(link){
     let target=marketUrl(link);
     for(let i=0;i<6;i++){
+      const mlId=mercadolivreItemId(target.href);
+      const mlVerified=mlId && process.env.ML_ACCESS_TOKEN ? await officialMLPrice(mlId) : null;
       // Para links diretos da Shopee, usar API oficial antes da página, que pode bloquear robôs.
       const shopIds=parseShopeeIds(target.href);
       if(shopIds) {
@@ -32,7 +34,11 @@
         target=marketUrl(new URL(location,target).href);
         continue;
       }
-      if(!response.ok) throw Error('A loja não disponibilizou os dados deste produto. Preencha manualmente.');
+      if(!response.ok) {
+        if(mlVerified) return {...mlVerified,title:'',image:'',category:'',source:target.hostname,
+          priceNote:'Preço confirmado pela API oficial do Mercado Livre. Título e imagem não foram liberados; complete manualmente.'};
+        throw Error('A loja não disponibilizou os dados deste produto. Preencha manualmente.');
+      }
       if(!(response.headers.get('content-type')||'').includes('text/html'))throw Error('O link não retornou uma página HTML.');
       const reader=response.body?.getReader();
       if(!reader)throw Error('Resposta vazia.');
@@ -49,9 +55,10 @@
         const verified=await officialShopeeProduct(canonicalIds);
         if(verified)return {...verified,itemId:canonicalIds.itemId,source:verified.source||target.hostname};
       }
-      if (product.itemId && process.env.ML_ACCESS_TOKEN) {
-        const official = await officialMLPrice(product.itemId);
-        if (official) Object.assign(product,official);
+      if(mlVerified)Object.assign(product,mlVerified);
+      else if(product.itemId && process.env.ML_ACCESS_TOKEN) {
+        const official=await officialMLPrice(product.itemId);
+        if(official)Object.assign(product,official);
       }
       return {
         ...product,
