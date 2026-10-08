@@ -99,7 +99,7 @@
         length:html.length,
         fieldShapes:[...html.matchAll(/product_id|item_id/gi)].slice(0,6)
           .map(m=>html.slice(m.index,m.index+110)
-            .replace(/\\d/g,'#')
+            .replace(/\d/g,'#')
             .replace(/[A-Za-z0-9_]{30,}/g,'[TEXT]'))
       };
       const product=extractProduct(html,target.href);
