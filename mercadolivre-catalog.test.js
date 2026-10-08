@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mercadoIdsFromPage,parseCatalogResponse,resolveCatalog} from './mercadolivre-catalog.js';
+import {mercadoIdsFromPage,parseCatalogResponse,resolveCatalog,verifyItem,matchingTitle} from './mercadolivre-catalog.js';
 
 const item='MLB4312345678',product='MLB65987654';
 test('distingue item e produto de catálogo em URLs oficiais',()=>{
@@ -17,11 +17,12 @@ test('identifica catálogo somente no card com título correspondente',()=>{
  assert.equal(r.catalogId,product);
  assert.equal(r.itemId,'');
 });
-test('rejeita identificadores de card diferente do anúncio',()=>{
+test('identifica ID social sem title/text, exigindo confirmação pela API',()=>{
  const body='<meta property="og:title" content="Calça Country Feminina">'+
-   '{"components":{"1":{"title":{"text":"Outra Calça"}}},"metadata":{"product_id":"MLB65987654"}}';
+   '{"components":{"1":{"title":{"name":"Outra Calça"}}},"metadata":{"product_id":"MLB65987654"}}';
  const r=mercadoIdsFromPage(body,'https://www.mercadolivre.com.br/social/country');
- assert.equal(r.catalogId,'');
+ assert.equal(r.catalogId,product);
+ assert.match(r.evidence,/exige verificar título/);
 });
 test('valida moeda BRL e correspondência do catálogo na resposta',()=>{
  const data={id:product,status:'active',buy_box_winner:{item_id:item,price:159.9,currency_id:'BRL'}};
@@ -49,4 +50,28 @@ test('resposta 401 é sinalizada sem expor a credencial',async()=>{
  const r=await resolveCatalog(product,'private',async()=>({ok:false,status:401}));
  assert.equal(r.status,'unauthorized');
  assert.equal(r.value,null);
+});
+
+test('confirma título oficial de anúncio social antes de buscar preço',async()=>{
+ const verified=await verifyItem(item,'Calça Country Feminina','token',async()=>
+   ({ok:true,json:async()=>({title:'Calça Country Feminina'})}));
+ assert.equal(verified.verified,true);
+ const wrong=await verifyItem(item,'Calça Country Feminina','token',async()=>
+   ({ok:true,json:async()=>({title:'Smartphone Android 128GB'})}));
+ assert.equal(wrong.verified,false);
+ assert.equal(wrong.status,'title_mismatch');
+});
+test('não permite preencher catálogo social sem nome correspondente',async()=>{
+ const r=await resolveCatalog(product,'token',async()=>({ok:true,json:async()=>({
+  id:product,name:'Smartphone Android 128GB',status:'active',
+  buy_box_winner:{item_id:item,price:59.9,currency_id:'BRL'}
+ })}),'Calça Country Feminina');
+ assert.equal(r.value,null);
+ assert.equal(r.status,'no_buy_box');
+});
+test('normalização de títulos aceita pontuação sem permitir produto diferente',()=>{
+ assert.equal(matchingTitle('Calça Country Feminina Cowgirl Rodeio Jeans Feminino Lycra',
+ 'Calça Country Feminina Cowgirl Rodeio Jeans Feminino Lycra'),true);
+ assert.equal(matchingTitle('Calça Country Feminina Cowgirl Rodeio Jeans Feminino Lycra',
+ 'Bota Couro Country Masculina'),false);
 });
