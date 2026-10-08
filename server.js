@@ -99,7 +99,6 @@
         length:html.length,
         fieldShapes:[...html.matchAll(/product_id|item_id/gi)].slice(0,6)
           .map(m=>html.slice(m.index,m.index+110)
-            .replace(/https?:\\/\\/[^\\s"']+/gi,'[URL]')
             .replace(/\\d/g,'#')
             .replace(/[A-Za-z0-9_]{30,}/g,'[TEXT]'))
       };
