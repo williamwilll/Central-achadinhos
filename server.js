@@ -3,7 +3,7 @@
   const { timingSafeEqual, createHash } = await import('node:crypto');
   const { extractProduct,mercadolivreItemId } = await import('./product-parser.js');
   const { officialMLPrice } = await import('./mercadolivre-price.js');
-  const {mercadoIdsFromPage,resolveCatalog} = await import('./mercadolivre-catalog.js');
+  const {mercadoIdsFromPage,resolveCatalog,verifyItem} = await import('./mercadolivre-catalog.js');
   const {parseShopeeIds,officialShopeeProduct} = await import('./shopee-affiliate.js');
   const { readFile, stat } = await import('node:fs/promises');
   const { fileURLToPath } = await import('node:url');
@@ -31,6 +31,7 @@
         if(trace.api==='forbidden')return 'A API retornou 403. Verifique as permissões da aplicação e do token.';
         if(trace.api==='no_buy_box')return 'O produto foi identificado, mas a API não encontrou oferta vencedora para confirmar o preço.';
         if(trace.api==='not_found')return 'O ID identificado não foi encontrado pela API. Confira o link do anúncio.';
+        if(trace.api==='title_mismatch')return 'O ID encontrado pertence a outro produto. O preço não foi importado por segurança.';
         return 'O produto foi identificado, mas a API não confirmou um preço. Confira o anúncio ou as permissões da integração.';
       }
       return 'Preço não encontrado nos dados da loja. Confira manualmente antes de divulgar.';
@@ -114,11 +115,18 @@
         if(advancePrice)Object.assign(product,advancePrice);
         else if(trace.configured){
           if(itemId){
-            const official=await officialMLPrice(itemId);
-            trace.api=official?'ok':'unavailable';
-            if(official)Object.assign(product,official);
+            const uncertain=ids.evidence?.includes('exige verificar título');
+            const confirmation=uncertain?await verifyItem(itemId,product.title):{status:'ok',verified:true};
+            if(!confirmation.verified)trace.api=confirmation.status;
+            else{
+              const official=await officialMLPrice(itemId);
+              trace.api=official?'ok':'unavailable';
+              if(official)Object.assign(product,official);
+            }
           }else if(catalogId){
-            const result=catalogAttempt?.value?catalogAttempt:await resolveCatalog(catalogId);
+            const uncertain=ids.evidence?.includes('exige verificar título');
+            const result=catalogAttempt?.value?catalogAttempt:
+              await resolveCatalog(catalogId,process.env.ML_ACCESS_TOKEN,fetch,uncertain?product.title:'');
             trace.api=result.status;
             if(result.value){
               const official=await officialMLPrice(result.value.itemId);
