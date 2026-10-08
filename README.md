@@ -30,9 +30,12 @@ Não informe senhas ou chaves de API no painel. Este projeto não possui afilia�
 
 No Render, abra **central-achadinhos > Environment > Add Environment Variable** e registre separadamente:
 
+- `CENTRAL_ADMIN_PASSWORD`: senha administrativa forte e exclusiva (configure antes das chaves das APIs). A Central exigirá autenticação HTTP Basic no navegador enquanto pelo menos uma API estiver habilitada. Use exclusivamente HTTPS no Render.
 - `ML_ACCESS_TOKEN`: token OAuth de acesso do Mercado Livre. Ele expira e deve ser renovado periodicamente; App ID e Client Secret não são substitutos do access token.
 - `SHOPEE_APP_ID`: App ID da Open API de Afiliados Shopee.
 - `SHOPEE_APP_SECRET`: segredo da Open API de Afiliados Shopee.
+
+Quando uma credencial da API for configurada sem `CENTRAL_ADMIN_PASSWORD`, o painel retorna **503** até a senha ser informada. O endpoint `/health` continua disponível para o Render. Esse bloqueio evita disponibilizar suas cotas de API publicamente.
 
 **Nunca inclua credenciais em mensagens, prints, no código-fonte ou em variáveis prefixadas por PUBLIC_.** Salve-as apenas nas variáveis de ambiente protegidas do serviço no Render.
 
