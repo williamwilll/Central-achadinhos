@@ -68,7 +68,19 @@ export function mercadoIdsFromPage(html, url, redirects=[]) {
   for(const m of page.matchAll(/"title"\s*:\s*\{\s*"text"\s*:\s*"([^"]{4,240})"/g)){
     if(normalizeText(m[1])===target)anchors.push(m.index);
   }
-  if(anchors.length!==1)return {itemId:'',catalogId:'',evidence:'Sem card único associado ao título'};
+  if(anchors.length!==1) {
+    // Em páginas sociais, o HTML pode trazer IDs dentro do estado da aplicação,
+    // mesmo sem o componente title/text. Só admitir identificadores únicos.
+    const fieldIds=(key)=>{
+      const regex=new RegExp('["\\x27]'+key+'["\\x27]\\\\s*:\\\\s*["\\x27]?(MLB-?\\\\d{7,14})','gi');
+      return [...new Set([...page.matchAll(regex)].map(m=>normal(m[1])))];
+    };
+    const itemIds=fieldIds('item_id');
+    const catalogIds=fieldIds('product_id');
+    if(itemIds.length===1)return {itemId:itemIds[0],catalogId:catalogIds.length===1?catalogIds[0]:'',evidence:'ID único em metadados sociais (exige verificar título)'};
+    if(catalogIds.length===1)return {itemId:'',catalogId:catalogIds[0],evidence:'Catálogo único em metadados sociais (exige verificar título)'};
+    return {itemId:'',catalogId:'',evidence:'IDs múltiplos ou indisponíveis'};
+  }
   const start=anchors[0];
   const context=page.slice(Math.max(0,start-4500),start+8500);
   // No card Mercado Livre, product_id indica catálogo, item_id identifica publicação.
@@ -80,9 +92,34 @@ export function mercadoIdsFromPage(html, url, redirects=[]) {
   if(catalogIds.length===1)return {itemId:'',catalogId:catalogIds[0],evidence:'Catálogo do card vinculado ao título'};
   return {itemId:'',catalogId:'',evidence:'Nenhum identificador inequívoco'};
 }
-export function parseCatalogResponse(body,requestedCatalog) {
+export function matchingTitle(pageTitle,officialTitle) {
+  const original=normalizeText(pageTitle).replace(/\b(mercado livre|mercadolivre)\b/g,'').trim();
+  const official=normalizeText(officialTitle).replace(/\b(mercado livre|mercadolivre)\b/g,'').trim();
+  if(!original||!official)return false;
+  if(original===official)return true;
+  const x=new Set(original.split(' ').filter(w=>w.length>2));
+  const y=new Set(official.split(' ').filter(w=>w.length>2));
+  if(x.size<3||y.size<3)return false;
+  const shared=[...x].filter(w=>y.has(w)).length;
+  return shared/Math.max(x.size,y.size) >= .8;
+}
+export async function verifyItem(itemId,pageTitle,token=process.env.ML_ACCESS_TOKEN,request=fetch) {
+  if(!valid(itemId)||!token||!pageTitle)return {status:'invalid',verified:false};
+  try {
+    const response=await request('https://api.mercadolibre.com/items/'+encodeURIComponent(itemId),{
+      headers:{Authorization:'Bearer '+token,Accept:'application/json'},
+      redirect:'error',signal:AbortSignal.timeout(6500)
+    });
+    if(!response.ok)return {status:response.status===401?'unauthorized':response.status===403?'forbidden':'http_error',verified:false};
+    const data=await response.json();
+    return {status:matchingTitle(pageTitle,data?.title)?'ok':'title_mismatch',verified:matchingTitle(pageTitle,data?.title)};
+  }catch{return {status:'network_error',verified:false};}
+}
+
+export function parseCatalogResponse(body,requestedCatalog,expectedTitle='') {
   const catalog=normal(body?.id);
   if(!valid(catalog)||catalog!==requestedCatalog||body?.status==='inactive')return null;
+  if(expectedTitle&&!matchingTitle(expectedTitle,body?.name||body?.family_name))return null;
   const win=body.buy_box_winner;
   const itemId=normal(win?.item_id);
   if(!valid(itemId))return null;
@@ -90,7 +127,7 @@ export function parseCatalogResponse(body,requestedCatalog) {
   if(win?.currency_id!=='BRL')return null;
   return {itemId,catalogId:catalog,price:amount};
 }
-export async function resolveCatalog(catalogId,token=process.env.ML_ACCESS_TOKEN,request=fetch){
+export async function resolveCatalog(catalogId,token=process.env.ML_ACCESS_TOKEN,request=fetch,expectedTitle=''){
   if(!valid(catalogId))return {status:'invalid_id',value:null};
   if(!token)return {status:'not_configured',value:null};
   try{
@@ -100,7 +137,7 @@ export async function resolveCatalog(catalogId,token=process.env.ML_ACCESS_TOKEN
     });
     if(!res.ok)return {status:res.status===401?'unauthorized':res.status===403?'forbidden':res.status===404?'not_found':'http_error',value:null};
     const data=await res.json();
-    const value=parseCatalogResponse(data,catalogId);
+    const value=parseCatalogResponse(data,catalogId,expectedTitle);
     return {status:value?'ok':'no_buy_box',value};
   }catch{return {status:'network_error',value:null};}
 }
