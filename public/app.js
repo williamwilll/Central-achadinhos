@@ -252,7 +252,18 @@
       const categoryText = data.category
         ? 'Categoria: ' + el('form-category').value + ' (' + (data.categorySource || 'encontrada') + ').'
         : 'Categoria não identificada. Você pode cadastrá-la manualmente.';
-      status.textContent = (data.priceNote || 'Confira o preço na loja.') + ' ' + categoryText;
+      const diagnostic = data.importDiagnostic;
+      let details = '';
+      if (diagnostic && data.price == null) {
+        const idLabel = {item:'anúncio identificado',catalog:'catálogo identificado',unknown:'ID do anúncio não identificado'}[diagnostic.identifier] || '';
+        const apiLabel = {unauthorized:'token recusado (401)',forbidden:'API sem permissão (403)',
+          not_found:'ID não encontrado',no_buy_box:'sem oferta vencedora',network_error:'falha de conexão',
+          unavailable:'consulta sem preço confirmado',price_unavailable:'sem preço confirmado',
+          not_attempted:'consulta não efetuada'}[diagnostic.api] || 'consulta realizada';
+        details = ' Diagnóstico: '+(diagnostic.tokenConfigured ? 'API configurada' : 'token não configurado')+
+          '; '+idLabel+'; '+apiLabel+'.';
+      }
+      status.textContent = (data.priceNote || 'Confira o preço na loja.') + ' ' + categoryText + details;
       status.className = data.price == null ? 'assist-message error' : 'assist-message success';
       updateLivePreview();
       toast(data.price != null ? 'Dados importados. Confira o valor antes de publicar.' : 'Produto identificado, porém sem preço confirmado.',data.price == null);
