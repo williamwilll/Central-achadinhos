@@ -7,7 +7,7 @@ test('servidor responde e restringe URLs de prévia', {timeout:12000}, async () 
   const base = 'http://127.0.0.1:' + port;
   const child = spawn(process.execPath, ['server.js'], {
     // Isolar o teste público das credenciais reais injetadas durante o build no Render.
-    cwd: process.cwd(), env: {...process.env, PORT:String(port), ML_ACCESS_TOKEN:'', SHOPEE_APP_ID:'', SHOPEE_APP_SECRET:'', CENTRAL_ADMIN_PASSWORD:''}, stdio:'ignore'
+    cwd: process.cwd(), env: {...process.env, PORT:String(port), ML_ACCESS_TOKEN:'', ML_CLIENT_ID:'', ML_CLIENT_SECRET:'', SHOPEE_APP_ID:'', SHOPEE_APP_SECRET:'', CENTRAL_ADMIN_PASSWORD:''}, stdio:'ignore'
   });
   try {
     let alive = false;
