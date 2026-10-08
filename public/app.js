@@ -466,7 +466,12 @@
   });
   mlConnectionStatus();
   if(new URLSearchParams(window.location.search).get('ml')==='connected') toast('Mercado Livre conectado com sucesso!');
-  if(new URLSearchParams(window.location.search).get('ml')==='error') toast('Não foi possível autorizar o Mercado Livre. Confira suas credenciais e tente novamente.',true);
+  if(new URLSearchParams(window.location.search).get('ml')==='error') {
+    const reason=new URLSearchParams(window.location.search).get('reason');
+    const hints={state:'A sessão de autorização expirou ou o cookie foi bloqueado.',token:'O Mercado Livre recusou a troca do código pelo token. Confira credenciais, URL e permissões.',response:'A API retornou tokens incompletos.',code:'O código de autorização veio ausente ou inválido.',denied:'O Mercado Livre não concluiu a autorização.',unknown:'Não foi possível concluir a autorização.'};
+    toast(hints[reason]||hints.unknown,true);
+    el('ml-oauth-status').textContent='Falha na conexão ('+(reason||'unknown')+'): '+(hints[reason]||hints.unknown);
+  }
 
   el('settings-form').addEventListener('submit', settingsSubmit);
   el('copy-invite').addEventListener('click', inviteCopy);
