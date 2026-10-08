@@ -1,5 +1,6 @@
 (async function boot(){
   const { createServer } = await import('node:http');
+  const { timingSafeEqual, createHash } = await import('node:crypto');
   const { extractProduct,mercadolivreItemId } = await import('./product-parser.js');
   const { officialMLPrice } = await import('./mercadolivre-price.js');
   const {parseShopeeIds,officialShopeeProduct} = await import('./shopee-affiliate.js');
@@ -78,9 +79,33 @@
     if(head)return res.end();
     return res.end(type.includes('json')?JSON.stringify(data):data);
   }
+  const protectedAPIs = Boolean(process.env.ML_ACCESS_TOKEN || process.env.SHOPEE_APP_ID || process.env.SHOPEE_APP_SECRET);
+  const adminPassword = process.env.CENTRAL_ADMIN_PASSWORD || '';
+  function authorized(req){
+    const header=req.headers.authorization || '';
+    if(!header.startsWith('Basic ') || !adminPassword)return false;
+    let decoded='';
+    try{decoded=Buffer.from(header.slice(6),'base64').toString('utf8');}catch{return false;}
+    const separator=decoded.indexOf(':');
+    if(separator<0)return false;
+    const supplied=decoded.slice(separator+1);
+    const lhs=createHash('sha256').update(supplied,'utf8').digest();
+    const rhs=createHash('sha256').update(adminPassword,'utf8').digest();
+    return timingSafeEqual(lhs,rhs);
+  }
   const server=createServer(async(req,res)=>{
     try{
       const path=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`).pathname;
+      // Health check continua público para o monitoramento do Render.
+      if(protectedAPIs && path !== '/health') {
+        if(!adminPassword)return send(res,503,{error:'Antes de ativar as APIs, configure CENTRAL_ADMIN_PASSWORD no Render.'});
+        if(!authorized(req)){
+          res.writeHead(401,{'content-type':'text/plain; charset=utf-8','cache-control':'no-store',
+            'www-authenticate':'Basic realm="Central de Achadinhos", charset="UTF-8"',
+            'x-content-type-options':'nosniff','referrer-policy':'no-referrer'});
+          return res.end('Autenticação administrativa necessária.');
+        }
+      }
       if(path==='/health')return send(res,200,{ok:true,version:'1.0.3'});
       if(path==='/api/preview'){
         if(req.method!=='POST')return send(res,405,{error:'Método inválido.'});
