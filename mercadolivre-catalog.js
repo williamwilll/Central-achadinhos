@@ -72,7 +72,7 @@ export function mercadoIdsFromPage(html, url, redirects=[]) {
     // Em páginas sociais, o HTML pode trazer IDs dentro do estado da aplicação,
     // mesmo sem o componente title/text. Só admitir identificadores únicos.
     const fieldIds=(key)=>{
-      const regex=new RegExp('["\\x27]'+key+'["\\x27]\\\\s*:\\\\s*["\\x27]?(MLB-?\\\\d{7,14})','gi');
+      const regex=new RegExp('["\\x27]'+key+'["\\x27]\\s*:\\s*["\\x27]?(MLB-?\\d{7,14})','gi');
       return [...new Set([...page.matchAll(regex)].map(m=>normal(m[1])))];
     };
     const itemIds=fieldIds('item_id');
