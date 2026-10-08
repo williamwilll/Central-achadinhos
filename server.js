@@ -208,7 +208,8 @@
             error.message.includes('tokens inválida')?'response':
             error.message.includes('Código de autorização')?'code':
             error.message.includes('Autorização não foi concluída')?'denied':'unknown';
-          console.warn('[ML_OAUTH] Falha na autorização; etapa='+reason);
+          const httpStatus=reason==='token'?(error.message.match(/HTTP (400|401|403|429|5\\d\\d)/)||[])[1]:undefined;
+          console.warn('[ML_OAUTH] Falha na autorização; etapa='+reason+(httpStatus?', http='+httpStatus:''));
           res.writeHead(303,{'location':'/?ml=error&reason='+reason,
             'cache-control':'no-store','referrer-policy':'no-referrer'});
           return res.end();
