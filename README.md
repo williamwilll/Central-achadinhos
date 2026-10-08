@@ -1,4 +1,4 @@
-# Central de Achadinhos — v1.0.1
+# Central de Achadinhos — v1.0.3
 
 Painel web gratuito para organizar ofertas de afiliados do Mercado Livre, Shopee e TikTok Shop e preparar publicações para WhatsApp.
 
@@ -25,3 +25,23 @@ Conecte o repositório como Web Service gratuito, runtime Node, branch main, com
 Os preços obtidos por metadados podem ser imprecisos ou estar desatualizados; revise sempre antes de publicar. A plataforma não calcula comissões, não consulta vendas, não obtém preços automaticamente em segundo plano nem envia mensagens diretamente para grupos/canais do WhatsApp. O compartilhamento é manual.
 
 Não informe senhas ou chaves de API no painel. Este projeto não possui afiliação oficial com os marketplaces ou WhatsApp.
+
+## Integração com as APIs de afiliados
+
+No Render, abra **central-achadinhos > Environment > Add Environment Variable** e registre separadamente:
+
+- `ML_ACCESS_TOKEN`: token OAuth de acesso do Mercado Livre. Ele expira e deve ser renovado periodicamente; App ID e Client Secret não são substitutos do access token.
+- `SHOPEE_APP_ID`: App ID da Open API de Afiliados Shopee.
+- `SHOPEE_APP_SECRET`: segredo da Open API de Afiliados Shopee.
+
+**Nunca inclua credenciais em mensagens, prints, no código-fonte ou em variáveis prefixadas por PUBLIC_.** Salve-as apenas nas variáveis de ambiente protegidas do serviço no Render.
+
+### Como funciona a importação
+
+- Para anúncio do Mercado Livre com ID identificado, o servidor tenta obter o preço pelo endpoint oficial `/items/{itemId}/sale_price` quando `ML_ACCESS_TOKEN` estiver definido.
+- Para anúncio Shopee com `shopId` e `itemId`, o servidor tenta a API GraphQL `productOfferV2` quando App ID/Secret estiverem definidos. Para links curtos precisa conseguir seguir o redirecionamento até o endereço com esses identificadores.
+- A foto, o título e o preço só são usados quando vinculados ao anúncio correto. Na Shopee, preços diferentes entre variações deixam o preço em branco até escolha manual.
+- O link de afiliado digitado permanece inalterado no cadastro.
+- Se a página bloquear robôs, faltar um identificador ou a API retornar erro, o importador solicita conferência manual e não inventa preços. A existência das credenciais não garante acesso ao preço de qualquer produto.
+
+Para diagnosticar um problema de importação, verifique os logs do Render sem divulgar tokens ou qualquer dado de autenticação.
