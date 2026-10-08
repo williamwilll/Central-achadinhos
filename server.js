@@ -74,7 +74,7 @@
   const server=createServer(async(req,res)=>{
     try{
       const path=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`).pathname;
-      if(path==='/health')return send(res,200,{ok:true,version:'1.0.2'});
+      if(path==='/health')return send(res,200,{ok:true,version:'1.0.3'});
       if(path==='/api/preview'){
         if(req.method!=='POST')return send(res,405,{error:'Método inválido.'});
         const chunks=[];let size=0;
