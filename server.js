@@ -3,6 +3,7 @@
   const { timingSafeEqual, createHash } = await import('node:crypto');
   const { extractProduct,mercadolivreItemId } = await import('./product-parser.js');
   const { officialMLPrice } = await import('./mercadolivre-price.js');
+  const { createAuthorization,completeAuthorization,getAuthorizedToken,sessionStatus,clearSessionCookie,ML_REDIRECT_URI } = await import('./ml-oauth.js');
   const {mercadoIdsFromPage,resolveCatalog,verifyItem} = await import('./mercadolivre-catalog.js');
   const {parseShopeeIds,officialShopeeProduct} = await import('./shopee-affiliate.js');
   const { readFile, stat } = await import('node:fs/promises');
@@ -18,16 +19,16 @@
     if(!MARKETS.some(m=>h===m||h.endsWith('.'+m))) throw Error('Este link não é de Shopee, Mercado Livre ou TikTok Shop.');
     return u;
   }
-  async function getPreview(link){
+  async function getPreview(link,mlToken=''){
     let target=marketUrl(link);
     const hops=[target.href];
     let trace={market:'',identifier:'unknown',api:'not_attempted',configured:false};
     const priceNote=(product)=>{
       if(product.price!==null&&product.price!==undefined) return 'Preço obtido de '+product.priceSource+'. Confira o preço final e a variação antes de divulgar.';
       if(trace.market==='Mercado Livre'){
-        if(!trace.configured)return 'API do Mercado Livre sem ML_ACCESS_TOKEN no Render. Cadastre o token OAuth válido.';
+        if(!trace.configured)return 'Mercado Livre ainda não conectado por OAuth neste navegador. Acesse Configurações e clique em Conectar Mercado Livre.';
         if(trace.identifier==='unknown')return 'O link curto não revelou o item ou o catálogo do anúncio. Abra o produto na loja e compartilhe a URL completa.';
-        if(trace.api==='unauthorized')return 'A API do Mercado Livre recusou o token (401). Atualize o access token OAuth no Render.';
+        if(trace.api==='unauthorized')return 'O Mercado Livre recusou a autorização. Vá em Configurações e reconecte a conta.';
         if(trace.api==='forbidden')return 'A API retornou 403. Verifique as permissões da aplicação e do token.';
         if(trace.api==='no_buy_box')return 'O produto foi identificado, mas a API não encontrou oferta vencedora para confirmar o preço.';
         if(trace.api==='not_found')return 'O ID identificado não foi encontrado pela API. Confira o link do anúncio.';
@@ -46,20 +47,20 @@
       const direct=mercadoIdsFromPage('',target.href,hops);
       const directIsML=Boolean(direct.itemId||direct.catalogId);
       trace.market=directIsML?'Mercado Livre':trace.market;
-      trace.configured=Boolean(process.env.ML_ACCESS_TOKEN);
+      trace.configured=Boolean(mlToken);
       let advancePrice=null;
       let catalogAttempt=null;
       if(direct.itemId&&trace.configured){
-        const official=await officialMLPrice(direct.itemId);
+        const official=await officialMLPrice(direct.itemId,mlToken);
         trace.identifier='item';
         trace.api=official?'ok':'unavailable';
         if(official)advancePrice=official;
       }else if(direct.catalogId&&trace.configured){
         trace.identifier='catalog';
-        catalogAttempt=await resolveCatalog(direct.catalogId);
+        catalogAttempt=await resolveCatalog(direct.catalogId,mlToken);
         trace.api=catalogAttempt.status;
         if(catalogAttempt.value){
-          const official=await officialMLPrice(catalogAttempt.value.itemId);
+          const official=await officialMLPrice(catalogAttempt.value.itemId,mlToken);
           advancePrice=official||(catalogAttempt.value.price!==null
             ? {price:catalogAttempt.value.price,oldPrice:null,priceSource:'Oferta vencedora do catálogo (confirmar variação)'} : null);
           trace.api=advancePrice?'ok':'price_unavailable';
@@ -116,20 +117,20 @@
         else if(trace.configured){
           if(itemId){
             const uncertain=ids.evidence?.includes('exige verificar título');
-            const confirmation=uncertain?await verifyItem(itemId,product.title):{status:'ok',verified:true};
+            const confirmation=uncertain?await verifyItem(itemId,product.title,mlToken):{status:'ok',verified:true};
             if(!confirmation.verified)trace.api=confirmation.status;
             else{
-              const official=await officialMLPrice(itemId);
+              const official=await officialMLPrice(itemId,mlToken);
               trace.api=official?'ok':'unavailable';
               if(official)Object.assign(product,official);
             }
           }else if(catalogId){
             const uncertain=ids.evidence?.includes('exige verificar título');
             const result=catalogAttempt?.value?catalogAttempt:
-              await resolveCatalog(catalogId,process.env.ML_ACCESS_TOKEN,fetch,uncertain?product.title:'');
+              await resolveCatalog(catalogId,mlToken,fetch,uncertain?product.title:'');
             trace.api=result.status;
             if(result.value){
-              const official=await officialMLPrice(result.value.itemId);
+              const official=await officialMLPrice(result.value.itemId,mlToken);
               if(official){Object.assign(product,official);trace.api='ok';}
               else if(result.value.price!==null){
                 Object.assign(product,{price:result.value.price,oldPrice:null,
@@ -147,12 +148,12 @@
     throw Error('Muitos redirecionamentos. Preencha manualmente.');
   }
   const MIMES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png'};
-  function send(res,status,data,type='application/json; charset=utf-8',head=false){
-    res.writeHead(status,{'content-type':type,'cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer','x-frame-options':'DENY','content-security-policy':"default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"});
+  function send(res,status,data,type='application/json; charset=utf-8',head=false,additionalHeaders={}){
+    res.writeHead(status,{'content-type':type,'cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer','x-frame-options':'DENY','content-security-policy':"default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",...additionalHeaders});
     if(head)return res.end();
     return res.end(type.includes('json')?JSON.stringify(data):data);
   }
-  const protectedAPIs = Boolean(process.env.ML_ACCESS_TOKEN || process.env.SHOPEE_APP_ID || process.env.SHOPEE_APP_SECRET);
+  const protectedAPIs = Boolean(process.env.ML_CLIENT_ID || process.env.ML_CLIENT_SECRET || process.env.SHOPEE_APP_ID || process.env.SHOPEE_APP_SECRET);
   const adminPassword = process.env.CENTRAL_ADMIN_PASSWORD || '';
   function authorized(req){
     const header=req.headers.authorization || '';
@@ -179,9 +180,40 @@
           return res.end('Autenticação administrativa necessária.');
         }
       }
-      if(path==='/health')return send(res,200,{ok:true,version:'1.0.3'});
+      if(path==='/health')return send(res,200,{ok:true,version:'1.0.4'});
+      if(path==='/api/ml/status'){
+        if(req.method!=='GET')return send(res,405,{error:'Método inválido.'});
+        return send(res,200,{...sessionStatus(req.headers.cookie),redirectUri:ML_REDIRECT_URI});
+      }
+      if(path==='/api/ml/start'){
+        if(req.method!=='GET')return send(res,405,{error:'Método inválido.'});
+        try{
+          const start=createAuthorization();
+          res.writeHead(302,{'location':start.url,'set-cookie':start.cookie,
+            'cache-control':'no-store','referrer-policy':'no-referrer'});
+          return res.end();
+        }catch{return send(res,503,{error:'Configure primeiro ML_CLIENT_ID e ML_CLIENT_SECRET no Render.'});}
+      }
+      if(path==='/api/ml/callback'){
+        if(req.method!=='GET')return send(res,405,{error:'Método inválido.'});
+        const query=new URL(req.url,'https://central-achadinhos.onrender.com').searchParams;
+        try{
+          const tokens=await completeAuthorization(Object.fromEntries(query.entries()),req.headers.cookie);
+          res.writeHead(303,{'location':'/?ml=connected','set-cookie':[tokens.cookie,tokens.clearState],
+            'cache-control':'no-store','referrer-policy':'no-referrer'});
+          return res.end();
+        }catch {
+          res.writeHead(303,{'location':'/?ml=error','cache-control':'no-store','referrer-policy':'no-referrer'});
+          return res.end();
+        }
+      }
+      if(path==='/api/ml/disconnect'){
+        if(req.method!=='POST')return send(res,405,{error:'Método inválido.'});
+        return send(res,200,{ok:true,connected:false},'application/json; charset=utf-8',false,{'set-cookie':clearSessionCookie()});
+      }
+
       if(path==='/api/integration-status')return send(res,200,{
-        mercadoLivre:{configured:Boolean(process.env.ML_ACCESS_TOKEN)},
+        mercadoLivre:{configured:Boolean(process.env.ML_CLIENT_ID&&process.env.ML_CLIENT_SECRET),connected:sessionStatus(req.headers.cookie).connected},
         shopee:{appIdConfigured:Boolean(process.env.SHOPEE_APP_ID),appSecretConfigured:Boolean(process.env.SHOPEE_APP_SECRET)},
         accessProtected:protectedAPIs && Boolean(adminPassword)
       });
@@ -192,7 +224,8 @@
         let body;
         try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{return send(res,400,{error:'JSON inválido.'});}
         if(typeof body.url!=='string'||body.url.length>2000)return send(res,400,{error:'Link inválido.'});
-        try{return send(res,200,await getPreview(body.url));}
+        try{const auth=await getAuthorizedToken(req.headers.cookie);
+          return send(res,200,await getPreview(body.url,auth.token||''),'application/json; charset=utf-8',false,auth.cookie?{'set-cookie':auth.cookie}:{});}
         catch(e){return send(res,422,{error:e?.message||'Prévia indisponível.'});}
       }
       if(req.method!=='GET'&&req.method!=='HEAD')return send(res,405,{error:'Método inválido.'});
@@ -206,7 +239,7 @@
   });
   server.listen(PORT,'0.0.0.0',()=>{
     console.log('Central de Achadinhos na porta '+PORT);
-    console.log('Integracoes configuradas: ML='+Boolean(process.env.ML_ACCESS_TOKEN)+
+    console.log('Integracoes configuradas: MLApp='+Boolean(process.env.ML_CLIENT_ID&&process.env.ML_CLIENT_SECRET)+
       ', ShopeeID='+Boolean(process.env.SHOPEE_APP_ID)+
       ', ShopeeSecret='+Boolean(process.env.SHOPEE_APP_SECRET)+
       ', SenhaAdmin='+Boolean(adminPassword));
