@@ -171,7 +171,7 @@
     try{
       const path=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`).pathname;
       // Health check continua público para o monitoramento do Render.
-      if(protectedAPIs && path !== '/health') {
+      if(protectedAPIs && path !== '/health' && path !== '/api/ml/callback') {
         if(!adminPassword)return send(res,503,{error:'Antes de ativar as APIs, configure CENTRAL_ADMIN_PASSWORD no Render.'});
         if(!authorized(req)){
           res.writeHead(401,{'content-type':'text/plain; charset=utf-8','cache-control':'no-store',
