@@ -240,8 +240,11 @@
       if (data.image) el('form-image').value = data.image;
       if (typeof data.price === 'number' && Number.isFinite(data.price) && data.price > 0) {
         el('form-price').value = data.price.toFixed(2).replace('.', ',');
+        el('form-old-price').value = typeof data.oldPrice === 'number' && Number.isFinite(data.oldPrice) && data.oldPrice > data.price
+          ? data.oldPrice.toFixed(2).replace('.', ',') : '';
       } else {
         el('form-price').value = '';
+        el('form-old-price').value = '';
       }
       if (data.category) el('form-category').value = rememberCategory(data.category,true);
       el('form-link').value = url; // preserva o link original do afiliado
