@@ -1,12 +1,12 @@
 {
   "name": "central-achadinhos",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "description": "Painel gratuito para organizar ofertas de afiliados",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --check public/app.js && node --check server.js && node --test"
   },
   "engines": {
     "node": ">=20"
