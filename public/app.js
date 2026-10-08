@@ -136,7 +136,7 @@
     previewAbort?.abort();
     el('preview-button').disabled = false;
     el('preview-button').textContent = 'Buscar dados';
-    el('offer-form').reset(); el('preview-url').value = '';
+    el('offer-form').reset(); el('preview-url').value = ''; el('lookup-url').value = ''; el('lookup-wrap').classList.add('hidden');
     el('preview-status').textContent = 'Cole um link. O sistema buscará título, imagem, preço e categoria disponíveis.';
     el('preview-status').className = 'assist-message';
     const o = id ? get(id) : null;
@@ -212,7 +212,7 @@
     status.textContent = 'Link reconhecido. Buscando título, imagem, preço e categoria…';
     importTimer = setTimeout(() => importPreview(url), 550);
   }
-  async function importPreview(urlOverride = '') {
+  async function importPreview(urlOverride = '', preserveAffiliate = false) {
     clearTimeout(importTimer);
     const url = safeHttp(urlOverride || el('preview-url').value, true);
     if (!url || !platformForLink(url)) return toast('Cole um link HTTPS da Shopee, Mercado Livre ou TikTok Shop.', true);
@@ -247,8 +247,7 @@
         el('form-old-price').value = '';
       }
       if (data.category) el('form-category').value = rememberCategory(data.category,true);
-      el('form-link').value = url; // preserva o link original do afiliado
-      el('preview-url').value = url;
+      if(!preserveAffiliate) {el('form-link').value = url; el('preview-url').value = url;}
       const categoryText = data.category
         ? 'Categoria: ' + el('form-category').value + ' (' + (data.categorySource || 'encontrada') + ').'
         : 'Categoria não identificada. Você pode cadastrá-la manualmente.';
@@ -264,12 +263,13 @@
           '; '+idLabel+'; '+apiLabel+'.';
       }
       status.textContent = (data.priceNote || 'Confira o preço na loja.') + ' ' + categoryText + details;
+      if(platform === 'Mercado Livre') el('lookup-wrap').classList.toggle('hidden',data.price != null);
       status.className = data.price == null ? 'assist-message error' : 'assist-message success';
       updateLivePreview();
       toast(data.price != null ? 'Dados importados. Confira o valor antes de publicar.' : 'Produto identificado, porém sem preço confirmado.',data.price == null);
     } catch (error) {
       if (serial !== importSerial || error?.name === 'AbortError') return;
-      el('form-link').value = url;
+      if(!preserveAffiliate) el('form-link').value = url;
       status.textContent = error.message + ' Link preservado; confira os campos faltantes manualmente.';
       status.className = 'assist-message error';
       toast('A loja não liberou todos os dados do produto.', true);
@@ -424,6 +424,12 @@
   });
   el('offer-form').addEventListener('submit', submitOffer);
   el('preview-button').addEventListener('click', () => importPreview());
+  el('lookup-button').addEventListener('click', () => {
+    const original = safeHttp(el('lookup-url').value,true);
+    if(!original) return toast('Cole a URL HTTPS original do anúncio.',true);
+    if(platformForLink(original)!=='Mercado Livre')return toast('Use uma URL completa do Mercado Livre.',true);
+    importPreview(original,true);
+  });
   el('copy-post').addEventListener('click', () => copy(caption(get(state.selected))));
   el('share-whatsapp').addEventListener('click', whatsappShare);
   el('mark-published').addEventListener('click', markPublished);
