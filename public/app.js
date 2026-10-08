@@ -433,6 +433,41 @@
   el('copy-post').addEventListener('click', () => copy(caption(get(state.selected))));
   el('share-whatsapp').addEventListener('click', whatsappShare);
   el('mark-published').addEventListener('click', markPublished);
+  async function mlConnectionStatus() {
+    const status=el('ml-oauth-status');
+    const connect=el('ml-connect'),disconnect=el('ml-disconnect');
+    try {
+      const response=await fetch('/api/ml/status',{credentials:'same-origin',cache:'no-store'});
+      if(!response.ok)throw Error('Não foi possível verificar a integração.');
+      const data=await response.json();
+      connect.disabled=!data.configured || data.connected;
+      disconnect.disabled=!data.connected;
+      status.className='assist-message '+(data.connected?'success':'');
+      status.textContent=data.connected
+        ? 'Conta Mercado Livre conectada. A importação consultará o preço oficial quando o anúncio puder ser identificado.'
+        : data.configured
+          ? 'Aplicativo configurado. Clique em Conectar Mercado Livre para autorizar sua conta.'
+          : 'Cadastre ML_CLIENT_ID e ML_CLIENT_SECRET no Render e depois clique em Conectar Mercado Livre.';
+    }catch {
+      status.className='assist-message error';
+      status.textContent='Não foi possível verificar a conexão. Atualize a página.';
+      connect.disabled=true;
+      disconnect.disabled=true;
+    }
+  }
+  el('ml-connect').addEventListener('click',()=>{window.location.assign('/api/ml/start');});
+  el('ml-disconnect').addEventListener('click',async()=>{
+    try{
+      const response=await fetch('/api/ml/disconnect',{method:'POST',credentials:'same-origin'});
+      if(!response.ok)throw Error();
+      await mlConnectionStatus();
+      toast('Conta Mercado Livre desconectada deste navegador.');
+    }catch {toast('Não foi possível desconectar. Tente novamente.',true);}
+  });
+  mlConnectionStatus();
+  if(new URLSearchParams(window.location.search).get('ml')==='connected') toast('Mercado Livre conectado com sucesso!');
+  if(new URLSearchParams(window.location.search).get('ml')==='error') toast('Não foi possível autorizar o Mercado Livre. Confira suas credenciais e tente novamente.',true);
+
   el('settings-form').addEventListener('submit', settingsSubmit);
   el('copy-invite').addEventListener('click', inviteCopy);
   el('export-json').addEventListener('click', exportJson);
