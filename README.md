@@ -1,4 +1,4 @@
-# Central de Achadinhos — v1.0.3
+# Central de Achadinhos — v1.0.4
 
 Painel web gratuito para organizar ofertas de afiliados do Mercado Livre, Shopee e TikTok Shop e preparar publicações para WhatsApp.
 
@@ -48,3 +48,18 @@ Quando uma credencial da API for configurada sem `CENTRAL_ADMIN_PASSWORD`, o pai
 - Se a página bloquear robôs, faltar um identificador ou a API retornar erro, o importador solicita conferência manual e não inventa preços. A existência das credenciais não garante acesso ao preço de qualquer produto.
 
 Para diagnosticar um problema de importação, verifique os logs do Render sem divulgar tokens ou qualquer dado de autenticação.
+
+## Mercado Livre — Conectar conta por OAuth (v1.0.4)
+
+1. Na conta de desenvolvedores do Mercado Livre, configure o Redirect URI **exatamente** como
+   `https://central-achadinhos.onrender.com/api/ml/callback`.
+2. No Render, em **Environment**, cadastre:
+   - `CENTRAL_ADMIN_PASSWORD` — senha forte (já necessária para ativar integrações privadas);
+   - `ML_CLIENT_ID` — ID do aplicativo Mercado Livre;
+   - `ML_CLIENT_SECRET` — chave secreta do aplicativo, regenerada se exposta.
+   - `ML_OAUTH_PKCE=true` somente se habilitou PKCE no painel de desenvolvedores.
+3. **Remova** a antiga variável `ML_ACCESS_TOKEN` que contiver o Client Secret ou um valor incorreto.
+4. Salve as variáveis, abra **Configurações → Conectar Mercado Livre** no próprio sistema e autorize a conta principal.
+5. O site guarda os tokens **criptografados em cookie HttpOnly Secure apenas no navegador que foi autorizado**, renovando o Access Token quando está perto de expirar. Em outro navegador ou dispositivo, repita a conexão.
+
+Não cole as credenciais em chats, prints, arquivos ou repositórios. Nenhuma credencial é registrada nos logs. Esta implementação não guarda os tokens em banco central; por isso não autoriza importação desassistida por agendamentos nem oferece sincronização entre dispositivos. A disponibilidade de preços varia conforme o item e a API.
