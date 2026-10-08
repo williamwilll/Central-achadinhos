@@ -3,6 +3,7 @@
   const { timingSafeEqual, createHash } = await import('node:crypto');
   const { extractProduct,mercadolivreItemId } = await import('./product-parser.js');
   const { officialMLPrice } = await import('./mercadolivre-price.js');
+  const {mercadoIdsFromPage,resolveCatalog} = await import('./mercadolivre-catalog.js');
   const {parseShopeeIds,officialShopeeProduct} = await import('./shopee-affiliate.js');
   const { readFile, stat } = await import('node:fs/promises');
   const { fileURLToPath } = await import('node:url');
@@ -19,25 +20,62 @@
   }
   async function getPreview(link){
     let target=marketUrl(link);
-    for(let i=0;i<6;i++){
-      const mlId=mercadolivreItemId(target.href);
-      const mlVerified=mlId && process.env.ML_ACCESS_TOKEN ? await officialMLPrice(mlId) : null;
-      // Para links diretos da Shopee, usar API oficial antes da página, que pode bloquear robôs.
-      const shopIds=parseShopeeIds(target.href);
-      if(shopIds) {
-        const verified=await officialShopeeProduct(shopIds);
-        if(verified)return {...verified,itemId:shopIds.itemId,source:verified.source||target.hostname};
+    const hops=[target.href];
+    let trace={market:'',identifier:'unknown',api:'not_attempted',configured:false};
+    const priceNote=(product)=>{
+      if(product.price!==null&&product.price!==undefined) return 'Preço obtido de '+product.priceSource+'. Confira o preço final e a variação antes de divulgar.';
+      if(trace.market==='Mercado Livre'){
+        if(!trace.configured)return 'API do Mercado Livre sem ML_ACCESS_TOKEN no Render. Cadastre o token OAuth válido.';
+        if(trace.identifier==='unknown')return 'O link curto não revelou o item ou o catálogo do anúncio. Abra o produto na loja e compartilhe a URL completa.';
+        if(trace.api==='unauthorized')return 'A API do Mercado Livre recusou o token (401). Atualize o access token OAuth no Render.';
+        if(trace.api==='forbidden')return 'A API retornou 403. Verifique as permissões da aplicação e do token.';
+        if(trace.api==='no_buy_box')return 'O produto foi identificado, mas a API não encontrou oferta vencedora para confirmar o preço.';
+        if(trace.api==='not_found')return 'O ID identificado não foi encontrado pela API. Confira o link do anúncio.';
+        return 'O produto foi identificado, mas a API não confirmou um preço. Confira o anúncio ou as permissões da integração.';
       }
-      const response=await fetch(target,{redirect:'manual',signal:AbortSignal.timeout(8000),headers:{'user-agent':'Mozilla/5.0 (compatible; AchadinhosPreview/1.0)','accept':'text/html'}});
+      return 'Preço não encontrado nos dados da loja. Confira manualmente antes de divulgar.';
+    };
+    for(let i=0;i<6;i++){
+      // Links Shopee diretos: preferir API oficial à leitura HTML.
+      const shopeeIds=parseShopeeIds(target.href);
+      if(shopeeIds){
+        const official=await officialShopeeProduct(shopeeIds);
+        if(official)return {...official,itemId:shopeeIds.itemId,source:official.source||target.hostname};
+      }
+      const direct=mercadoIdsFromPage('',target.href,hops);
+      const directIsML=Boolean(direct.itemId||direct.catalogId);
+      trace.market=directIsML?'Mercado Livre':trace.market;
+      trace.configured=Boolean(process.env.ML_ACCESS_TOKEN);
+      let advancePrice=null;
+      let catalogAttempt=null;
+      if(direct.itemId&&trace.configured){
+        const official=await officialMLPrice(direct.itemId);
+        trace.identifier='item';
+        trace.api=official?'ok':'unavailable';
+        if(official)advancePrice=official;
+      }else if(direct.catalogId&&trace.configured){
+        trace.identifier='catalog';
+        catalogAttempt=await resolveCatalog(direct.catalogId);
+        trace.api=catalogAttempt.status;
+        if(catalogAttempt.value){
+          const official=await officialMLPrice(catalogAttempt.value.itemId);
+          advancePrice=official||(catalogAttempt.value.price!==null
+            ? {price:catalogAttempt.value.price,oldPrice:null,priceSource:'Oferta vencedora do catálogo (confirmar variação)'} : null);
+          trace.api=advancePrice?'ok':'price_unavailable';
+        }
+      }
+      const response=await fetch(target,{redirect:'manual',signal:AbortSignal.timeout(8000),
+        headers:{'user-agent':'Mozilla/5.0 (compatible; AchadinhosPreview/1.0)','accept':'text/html','accept-language':'pt-BR,pt;q=0.9'}});
       if(response.status>=300&&response.status<400){
         const location=response.headers.get('location');
         if(!location)throw Error('O redirecionamento não informou um endereço.');
         target=marketUrl(new URL(location,target).href);
+        hops.push(target.href);
         continue;
       }
       if(!response.ok) {
-        if(mlVerified) return {...mlVerified,title:'',image:'',category:'',source:target.hostname,
-          priceNote:'Preço confirmado pela API oficial do Mercado Livre. Título e imagem não foram liberados; complete manualmente.'};
+        if(advancePrice)return {...advancePrice,title:'',image:'',category:'',source:target.hostname,
+          priceNote:'Preço identificado pela API. A loja bloqueou os demais dados; complete título e foto manualmente.'};
         throw Error('A loja não disponibilizou os dados deste produto. Preencha manualmente.');
       }
       if(!(response.headers.get('content-type')||'').includes('text/html'))throw Error('O link não retornou uma página HTML.');
@@ -45,31 +83,48 @@
       if(!reader)throw Error('Resposta vazia.');
       const chunks=[];let n=0;
       try{
-        while(true){const {done,value}=await reader.read();if(done)break;n+=value.byteLength;if(n>1500000)throw Error('A página excedeu o limite de leitura.');chunks.push(value);}
+        while(true){const {done,value}=await reader.read();if(done)break;n+=value.byteLength;
+          if(n>1500000)throw Error('A página excedeu o limite de leitura.');chunks.push(value);}
       }finally{await reader.cancel().catch(()=>{});}
       const html=new TextDecoder().decode(Buffer.concat(chunks));
-      const product = extractProduct(html,target.href);
-      // Algumas páginas da Shopee carregam uma URL canônica com shopId/itemId.
-      const canonical=html.match(/<meta\s+[^>]*(?:property|name)=["']og:url["'][^>]*content=["']([^"']+)["']/i)?.[1] || '';
+      const product=extractProduct(html,target.href);
+      const canonical=html.match(/<meta\s+[^>]*(?:property|name)=["']og:url["'][^>]*content=["']([^"']+)["']/i)?.[1]||'';
       const canonicalIds=parseShopeeIds(canonical);
-      if(canonicalIds) {
+      if(canonicalIds){
         const verified=await officialShopeeProduct(canonicalIds);
         if(verified)return {...verified,itemId:canonicalIds.itemId,source:verified.source||target.hostname};
       }
-      if(mlVerified)Object.assign(product,mlVerified);
-      else if(product.itemId && process.env.ML_ACCESS_TOKEN) {
-        const official=await officialMLPrice(product.itemId);
-        if(official)Object.assign(product,official);
+      const mlPage=/mercadolivre|mercadolibre|meli\.la/i.test(hops.join(' '));
+      if(mlPage){
+        trace.market='Mercado Livre';
+        const ids=mercadoIdsFromPage(html,target.href,hops);
+        const itemId=ids.itemId||direct.itemId;
+        const catalogId=ids.catalogId||direct.catalogId;
+        trace.identifier=itemId?'item':catalogId?'catalog':'unknown';
+        if(advancePrice)Object.assign(product,advancePrice);
+        else if(trace.configured){
+          if(itemId){
+            const official=await officialMLPrice(itemId);
+            trace.api=official?'ok':'unavailable';
+            if(official)Object.assign(product,official);
+          }else if(catalogId){
+            const result=catalogAttempt?.value?catalogAttempt:await resolveCatalog(catalogId);
+            trace.api=result.status;
+            if(result.value){
+              const official=await officialMLPrice(result.value.itemId);
+              if(official){Object.assign(product,official);trace.api='ok';}
+              else if(result.value.price!==null){
+                Object.assign(product,{price:result.value.price,oldPrice:null,
+                  priceSource:'Oferta vencedora do catálogo (confirmar variação)'});
+                trace.api='ok';
+              }
+            }
+          }
+        }
       }
-      return {
-        ...product,
-        source: target.hostname,
-        priceNote: product.priceNote || (product.price === null
-          ? (product.itemId
-              ? 'Preço indisponível nesta consulta. A API oficial exige credencial válida; confira o anúncio ou configure ML_ACCESS_TOKEN no Render.'
-              : 'O link não forneceu preço nem identificador confiável. Tente o link completo do anúncio; confirme o valor na loja.')
-          : 'Preço obtido de ' + product.priceSource + '. Confira no anúncio antes de publicar.')
-      };
+      return {...product,source:target.hostname,priceNote:priceNote(product),
+        importDiagnostic:trace.market==='Mercado Livre'
+          ?{market:trace.market,identifier:trace.identifier,api:trace.api,tokenConfigured:trace.configured}:undefined};
     }
     throw Error('Muitos redirecionamentos. Preencha manualmente.');
   }
