@@ -87,6 +87,16 @@
           if(n>1500000)throw Error('A página excedeu o limite de leitura.');chunks.push(value);}
       }finally{await reader.cancel().catch(()=>{});}
       const html=new TextDecoder().decode(Buffer.concat(chunks));
+      // Informações estruturais para diagnóstico; nunca expor HTML, link completo ou token.
+      const signals={
+        finalHost:target.hostname,finalPathType:target.pathname.includes('/social')?'social':target.pathname.includes('/p/')?'catalog':'other',
+        mlbTokens:(html.match(/\\bMLB-?\\d{7,14}\\b/gi)||[]).length,
+        productFields:(html.match(/product_id/gi)||[]).length,
+        itemFields:(html.match(/item_id/gi)||[]).length,
+        titleCards:(html.match(/"title"\\s*:\\s*\\{\\s*"text"/gi)||[]).length,
+        hasJsonEscapes:html.includes('\\\\"'),
+        length:html.length
+      };
       const product=extractProduct(html,target.href);
       const canonical=html.match(/<meta\s+[^>]*(?:property|name)=["']og:url["'][^>]*content=["']([^"']+)["']/i)?.[1]||'';
       const canonicalIds=parseShopeeIds(canonical);
@@ -124,7 +134,7 @@
       }
       return {...product,source:target.hostname,priceNote:priceNote(product),
         importDiagnostic:trace.market==='Mercado Livre'
-          ?{market:trace.market,identifier:trace.identifier,api:trace.api,tokenConfigured:trace.configured}:undefined};
+          ?{market:trace.market,identifier:trace.identifier,api:trace.api,tokenConfigured:trace.configured,signals}:undefined};
     }
     throw Error('Muitos redirecionamentos. Preencha manualmente.');
   }
@@ -197,7 +207,8 @@
       const d=result.importDiagnostic||{};
       console.log('ML_SELFTEST:',JSON.stringify({
         identifier:d.identifier||'unknown',api:d.api||'unknown',tokenConfigured:!!d.tokenConfigured,
-        priceAvailable:typeof result.price==='number'&&result.price>0,hasTitle:!!result.title
+        priceAvailable:typeof result.price==='number'&&result.price>0,hasTitle:!!result.title,
+        signals:d.signals||null
       }));
     }).catch(()=>console.log('ML_SELFTEST:',JSON.stringify({fetchFailed:true})));
   });
