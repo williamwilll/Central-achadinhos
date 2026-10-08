@@ -96,11 +96,7 @@
         itemFields:(html.match(/item_id/gi)||[]).length,
         titleCards:(html.match(/"title"\s*:\s*\{\s*"text"/gi)||[]).length,
         hasJsonEscapes:html.includes('\\\\"'),
-        length:html.length,
-        fieldShapes:[...html.matchAll(/product_id|item_id/gi)].slice(0,6)
-          .map(m=>html.slice(m.index,m.index+110)
-            .replace(/\d/g,'#')
-            .replace(/[A-Za-z0-9_]{30,}/g,'[TEXT]'))
+        length:html.length
       };
       const product=extractProduct(html,target.href);
       const canonical=html.match(/<meta\s+[^>]*(?:property|name)=["']og:url["'][^>]*content=["']([^"']+)["']/i)?.[1]||'';
@@ -214,14 +210,6 @@
       ', ShopeeID='+Boolean(process.env.SHOPEE_APP_ID)+
       ', ShopeeSecret='+Boolean(process.env.SHOPEE_APP_SECRET)+
       ', SenhaAdmin='+Boolean(adminPassword));
-    // Verificação temporária e segura do anúncio reportado (nenhum segredo ou preço em logs).
-    getPreview('https://meli.la/2v48pY7').then(result=>{
-      const d=result.importDiagnostic||{};
-      console.log('ML_SELFTEST:',JSON.stringify({
-        identifier:d.identifier||'unknown',api:d.api||'unknown',tokenConfigured:!!d.tokenConfigured,
-        priceAvailable:typeof result.price==='number'&&result.price>0,hasTitle:!!result.title,
-        signals:d.signals||null
-      }));
-    }).catch(()=>console.log('ML_SELFTEST:',JSON.stringify({fetchFailed:true})));
+
   });
 })();
