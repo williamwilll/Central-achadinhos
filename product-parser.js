@@ -143,7 +143,7 @@ export function extractProduct(html, url) {
     const n = parseBRLPrice(metaPrice);
     if (n != null) {price = n; priceSource = 'Metadados públicos da loja';}
   }
-  if (price === null && /(?:^|\\.)mercadolivre\\.com\\.br$/i.test(page.hostname)) {
+  if (price === null && /(?:^|\.)mercadolivre\.com\.br$/i.test(page.hostname)) {
     const visible = visibleMercadoLivrePrice(html);
     if (visible !== null) { price = visible; priceSource = 'Preço principal exibido no anúncio'; }
   }
