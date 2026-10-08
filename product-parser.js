@@ -95,6 +95,33 @@ function breadcrumbCategory(nodes, title) {
   }
   return '';
 }
+// Mercado Livre apresenta o preço principal em um bloco distinto do valor
+// riscado e dos parcelamentos. Nunca vasculhar números indiscriminadamente.
+export function mercadolivreItemId(input) {
+  const value = String(input || '');
+  // Não aceitar números soltos para evitar relacionar anúncios diferentes.
+  const found = value.match(/\bMLB[-_]?(\d{7,14})\b/i);
+  return found ? 'MLB'+found[1] : '';
+}
+export function visibleMercadoLivrePrice(html) {
+  const blocks=[];
+  let cursor=0;
+  for(let scan=0;scan<6;scan++) {
+    const idx=html.indexOf('ui-pdp-price__second-line',cursor);
+    if(idx<0)break;
+    cursor=idx+'ui-pdp-price__second-line'.length;
+    const group=html.slice(cursor,cursor+6500).split(/<\/div>/i)[0];
+    const body=group.slice(0,3000);
+    const money=body.match(/(?:andes-money-amount__fraction|price-tag-fraction)[^>]*>\s*([\d.,]+)\s*</i);
+    if(!money)continue;
+    let fraction=money[1].replace(/[^\d]/g,'');
+    const cents=body.slice(money.index+money[0].length).match(/(?:andes-money-amount__cents|price-tag-cents)[^>]*>\s*(\d{1,2})\s*</i);
+    const value=parseBRLPrice(fraction+(cents ? '.'+cents[1].padStart(2,'0') : ''));
+    if(value!==null)blocks.push(value);
+  }
+  return [...new Set(blocks)].length===1 ? blocks[0] : null;
+}
+
 export function extractProduct(html, url) {
   const page = new URL(url);
   const brazil = /(?:^|\.)mercadolivre\.com\.br$|(?:^|\.)shopee\.com\.br$/i.test(page.hostname);
@@ -116,6 +143,10 @@ export function extractProduct(html, url) {
     const n = parseBRLPrice(metaPrice);
     if (n != null) {price = n; priceSource = 'Metadados públicos da loja';}
   }
+  if (price === null && /(?:^|\\.)mercadolivre\\.com\\.br$/i.test(page.hostname)) {
+    const visible = visibleMercadoLivrePrice(html);
+    if (visible !== null) { price = visible; priceSource = 'Preço principal exibido no anúncio'; }
+  }
   if (price === null && product) {
     const values = nodesFromProduct(product).filter(offer=>currencyOK(offer?.priceCurrency || offer?.priceSpecification?.priceCurrency || product?.priceCurrency, brazil))
       .map(offer=>parseBRLPrice(offer?.price ?? offer?.priceSpecification?.price)).filter(x=>x !== null);
@@ -126,5 +157,7 @@ export function extractProduct(html, url) {
   const categoryBreadcrumb = breadcrumbCategory(nodes,title);
   const category = categoryDirect || categoryBreadcrumb || inference(title);
   const categorySource = categoryDirect ? 'Loja' : categoryBreadcrumb ? 'Navegação da loja' : category ? 'Sugestão pelo título' : '';
-  return {title,image,price,category,categorySource,priceSource};
+  const canonical = tags.get('og:url') || '';
+  const itemId = mercadolivreItemId(page.pathname) || mercadolivreItemId(canonical) || mercadolivreItemId(html.match(/<link\s+[^>]*rel=["']canonical["'][^>]*>/i)?.[0] || '');
+  return {title,image,price,category,categorySource,priceSource,itemId};
 }
