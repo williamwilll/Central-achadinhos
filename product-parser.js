@@ -103,23 +103,30 @@ export function mercadolivreItemId(input) {
   const found = value.match(/\bMLB[-_]?(\d{7,14})\b/i);
   return found ? 'MLB'+found[1] : '';
 }
+// Preço principal da PDP, excluindo riscos e parcelas.
 export function visibleMercadoLivrePrice(html) {
-  const blocks=[];
-  let cursor=0;
-  for(let scan=0;scan<6;scan++) {
-    const idx=html.indexOf('ui-pdp-price__second-line',cursor);
-    if(idx<0)break;
-    cursor=idx+'ui-pdp-price__second-line'.length;
-    const group=html.slice(cursor,cursor+6500).split(/<\/div>/i)[0];
-    const body=group.slice(0,3000);
-    const money=body.match(/(?:andes-money-amount__fraction|price-tag-fraction)[^>]*>\s*([\d.,]+)\s*</i);
-    if(!money)continue;
-    let fraction=money[1].replace(/[^\d]/g,'');
-    const cents=body.slice(money.index+money[0].length).match(/(?:andes-money-amount__cents|price-tag-cents)[^>]*>\s*(\d{1,2})\s*</i);
-    const value=parseBRLPrice(fraction+(cents ? '.'+cents[1].padStart(2,'0') : ''));
-    if(value!==null)blocks.push(value);
+  const values=[];
+  const markers=['ui-pdp-price__second-line','ui-pdp-price__main-container','ui-pdp-price__part'];
+  for (const marker of markers) {
+    let pos=0;
+    for(let i=0;i<5;i++){
+      const start=html.indexOf(marker,pos);
+      if(start<0)break;
+      pos=start+marker.length;
+      const window=html.slice(pos,pos+10000);
+      // Preço aparece em elementos filhos; não parar na primeira </div>.
+      const fraction=window.match(/class=["'][^"']*(?:andes-money-amount__fraction|price-tag-fraction)[^"']*["'][^>]*>\s*([\d.,]+)/i);
+      if(!fraction)continue;
+      const cents=window.slice(fraction.index+fraction[0].length,fraction.index+fraction[0].length+650)
+        .match(/class=["'][^"']*(?:andes-money-amount__cents|price-tag-cents)[^"']*["'][^>]*>\s*(\d{1,2})/i);
+      const whole=fraction[1].replace(/\D/g,'');
+      const amount=parseBRLPrice(whole+(cents?'.'+cents[1].padStart(2,'0'):''));
+      if(amount!==null) values.push(amount);
+      // Só considerar o primeiro preço visível em cada bloco.
+      break;
+    }
   }
-  return [...new Set(blocks)].length===1 ? blocks[0] : null;
+  return new Set(values).size===1 ? values[0] : null;
 }
 
 // Fallback para páginas sociais dos links meli.la: o bloco do produto
