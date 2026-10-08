@@ -1,5 +1,6 @@
 (async function boot(){
   const { createServer } = await import('node:http');
+  const { extractProduct } = await import('./product-parser.js');
   const { readFile, stat } = await import('node:fs/promises');
   const { fileURLToPath } = await import('node:url');
   const { dirname, resolve, extname, sep } = await import('node:path');
@@ -12,49 +13,6 @@
     const h=u.hostname.toLowerCase();
     if(!MARKETS.some(m=>h===m||h.endsWith('.'+m))) throw Error('Este link não é de Shopee, Mercado Livre ou TikTok Shop.');
     return u;
-  }
-  function decode(s){
-    return String(s||'').replace(/&(?:amp|quot|apos|lt|gt|nbsp|#(\d+)|#x([a-f0-9]+));/gi,(matched,dec,hex)=>{
-      const map={'&amp;':'&','&quot;':'"','&apos;':"'",'&lt;':'<','&gt;':'>','&nbsp;':' '};
-      if(map[matched.toLowerCase()]) return map[matched.toLowerCase()];
-      const n=Number.parseInt(dec||hex,dec?10:16);
-      return n>0&&n<=0x10ffff?String.fromCodePoint(n):matched;
-    }).replace(/\s+/g,' ').trim();
-  }
-  function meta(html,wanted) {
-    for(const item of html.matchAll(/<meta\s+[^>]*>/gi)){
-      const attrs={};
-      for(const a of item[0].matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) attrs[a[1].toLowerCase()]=a[2]??a[3]??a[4];
-      const k=(attrs.property||attrs.name||attrs.itemprop||'').toLowerCase();
-      if(wanted.includes(k)) return decode(attrs.content);
-    }
-    return '';
-  }
-  function explicitPrice(html){
-    const amount=meta(html,['product:price:amount','og:price:amount','price']);
-    const currency=meta(html,['product:price:currency','og:price:currency','pricecurrency']);
-    if(amount && (!currency||currency.toUpperCase()==='BRL') && /^\d{1,8}(?:[.,]\d{1,2})?$/.test(amount)) return Number(amount.replace(',','.'));
-    for(const match of html.matchAll(/<script\s+[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){
-      try{
-        const stack=[JSON.parse(match[1])];
-        let visits=0;
-        while(stack.length&&visits++<150){
-          const obj=stack.pop();
-          if(!obj||typeof obj!=='object') continue;
-          if(Array.isArray(obj)){stack.push(...obj.slice(0,50));continue;}
-          const type=obj['@type'];
-          const product=typeof type==='string'?/product/i.test(type):Array.isArray(type)&&type.some(t=>/product/i.test(t));
-          if(product&&obj.offers){
-            const offer=Array.isArray(obj.offers)?obj.offers[0]:obj.offers;
-            const price=offer?.price??offer?.priceSpecification?.price;
-            const cur=offer?.priceCurrency??offer?.priceSpecification?.priceCurrency??obj.priceCurrency;
-            if(price!=null&&(!cur||String(cur).toUpperCase()==='BRL')&&/^\d{1,8}(?:[.,]\d{1,2})?$/.test(String(price)))return Number(String(price).replace(',','.'));
-          }
-          stack.push(...Object.values(obj).filter(v=>v&&typeof v==='object').slice(0,50));
-        }
-      }catch{}
-    }
-    return null;
   }
   async function getPreview(link){
     let target=marketUrl(link);
@@ -75,11 +33,14 @@
         while(true){const {done,value}=await reader.read();if(done)break;n+=value.byteLength;if(n>1500000)throw Error('A página excedeu o limite de leitura.');chunks.push(value);}
       }finally{await reader.cancel().catch(()=>{});}
       const html=new TextDecoder().decode(Buffer.concat(chunks));
-      const title=decode(meta(html,['og:title','twitter:title'])||html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||'').slice(0,180);
-      let image='';
-      try{const u=new URL(meta(html,['og:image','twitter:image']),target);if(u.protocol==='https:')image=u.href;}catch{}
-      const price=explicitPrice(html);
-      return {title,image,price,source:target.hostname,priceNote:price==null?'Preço não identificado: preencha o preço real.':'Preço encontrado em metadados públicos: confirme no anúncio antes de publicar.'};
+      const product = extractProduct(html,target.href);
+      return {
+        ...product,
+        source: target.hostname,
+        priceNote: product.price === null
+          ? 'Preço não identificado. Verifique o valor na loja e preencha manualmente.'
+          : 'Preço obtido de ' + product.priceSource + '. Confira o valor final na loja antes de divulgar.'
+      };
     }
     throw Error('Muitos redirecionamentos. Preencha manualmente.');
   }
@@ -92,7 +53,7 @@
   const server=createServer(async(req,res)=>{
     try{
       const path=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`).pathname;
-      if(path==='/health')return send(res,200,{ok:true,version:'1.0.1'});
+      if(path==='/health')return send(res,200,{ok:true,version:'1.0.2'});
       if(path==='/api/preview'){
         if(req.method!=='POST')return send(res,405,{error:'Método inválido.'});
         const chunks=[];let size=0;
