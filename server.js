@@ -162,6 +162,11 @@
         }
       }
       if(path==='/health')return send(res,200,{ok:true,version:'1.0.3'});
+      if(path==='/api/integration-status')return send(res,200,{
+        mercadoLivre:{configured:Boolean(process.env.ML_ACCESS_TOKEN)},
+        shopee:{appIdConfigured:Boolean(process.env.SHOPEE_APP_ID),appSecretConfigured:Boolean(process.env.SHOPEE_APP_SECRET)},
+        accessProtected:protectedAPIs && Boolean(adminPassword)
+      });
       if(path==='/api/preview'){
         if(req.method!=='POST')return send(res,405,{error:'Método inválido.'});
         const chunks=[];let size=0;
@@ -181,5 +186,11 @@
       return send(res,200,file,MIMES[extname(target)]||'application/octet-stream',req.method==='HEAD');
     }catch{return send(res,500,{error:'Erro interno.'});}
   });
-  server.listen(PORT,'0.0.0.0',()=>console.log('Central de Achadinhos na porta '+PORT));
+  server.listen(PORT,'0.0.0.0',()=>{
+    console.log('Central de Achadinhos na porta '+PORT);
+    console.log('Integracoes configuradas: ML='+Boolean(process.env.ML_ACCESS_TOKEN)+
+      ', ShopeeID='+Boolean(process.env.SHOPEE_APP_ID)+
+      ', ShopeeSecret='+Boolean(process.env.SHOPEE_APP_SECRET)+
+      ', SenhaAdmin='+Boolean(adminPassword));
+  });
 })();
